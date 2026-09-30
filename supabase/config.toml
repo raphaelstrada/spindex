@@ -1,0 +1,4 @@
+project_id = "vinyl-catalog"
+
+[functions.discogs-search]
+verify_jwt = true
