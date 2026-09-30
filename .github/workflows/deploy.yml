@@ -27,7 +27,6 @@ jobs:
 
       - name: Build Project
         env:
-          # Injects your Supabase keys during the Vite build process
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
