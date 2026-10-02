@@ -54,9 +54,10 @@ function createFormSchema(language: Language) {
 type FormInput = z.input<ReturnType<typeof createFormSchema>>
 type FormValues = z.output<ReturnType<typeof createFormSchema>>
 
-export function RecordForm({ language, record, onSuccess }: {
+export function RecordForm({ language, record, initialValues, onSuccess }: {
   language: Language
   record?: VinylRecord
+  initialValues?: Partial<VinylRecord>
   onSuccess?: (values: FormValues) => void
 }) {
   const t = translations[language].form
@@ -76,34 +77,34 @@ export function RecordForm({ language, record, onSuccess }: {
   const form = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(createFormSchema(language)),
     defaultValues: {
-      artist: record?.artist ?? '',
-      title: record?.title ?? '',
-      record_label: record?.record_label ?? '',
-      genre: record?.genre ?? '',
-      sub_genre: record?.sub_genre ?? '',
-      record_type: record?.record_type ?? 'LP',
-      record_size: record?.record_size ?? '12"',
-      year_pressed: record?.year_pressed ?? undefined,
-      country_pressed: record?.country_pressed ?? '',
-      media_condition: record?.media_condition ?? 'VG+',
-      sleeve_condition: record?.sleeve_condition ?? 'VG+',
+      artist: record?.artist ?? initialValues?.artist ?? '',
+      title: record?.title ?? initialValues?.title ?? '',
+      record_label: record?.record_label ?? initialValues?.record_label ?? '',
+      genre: record?.genre ?? initialValues?.genre ?? '',
+      sub_genre: record?.sub_genre ?? initialValues?.sub_genre ?? '',
+      record_type: record?.record_type ?? initialValues?.record_type ?? 'LP',
+      record_size: record?.record_size ?? initialValues?.record_size ?? '12"',
+      year_pressed: record?.year_pressed ?? initialValues?.year_pressed ?? undefined,
+      country_pressed: record?.country_pressed ?? initialValues?.country_pressed ?? '',
+      media_condition: record?.media_condition ?? initialValues?.media_condition ?? 'VG+',
+      sleeve_condition: record?.sleeve_condition ?? initialValues?.sleeve_condition ?? 'VG+',
       is_original: record?.is_original ?? true,
       is_special_edition: record?.is_special_edition ?? false,
       special_edition_reason: record?.special_edition_reason ?? '',
       sell_possibility: record?.sell_possibility ?? false,
       sold: record?.sold ?? false,
-      discogs_lowest_price: record?.discogs_lowest_price ?? undefined,
-      notes: record?.notes ?? '',
-      discogs_link: record?.discogs_link ?? '',
-      image_url: record?.image_url ?? '',
-      source_url: record?.source_url ?? '',
+      discogs_lowest_price: record?.discogs_lowest_price ?? initialValues?.discogs_lowest_price ?? undefined,
+      notes: record?.notes ?? initialValues?.notes ?? '',
+      discogs_link: record?.discogs_link ?? initialValues?.discogs_link ?? '',
+      image_url: record?.image_url ?? initialValues?.image_url ?? '',
+      source_url: record?.source_url ?? initialValues?.source_url ?? '',
     },
   })
 
   async function onSubmit(values: FormValues) {
     const { error } = record
       ? await supabase.from('vinyl_records').update(values).eq('id', record.id)
-      : await supabase.from('vinyl_records').insert([values])
+      : await supabase.from('vinyl_records').insert([{ ...values, collection_owner: 'Raphael' }])
     
     if (error) {
       console.error('Failed to insert record:', error.message)
@@ -295,7 +296,55 @@ export function RecordForm({ language, record, onSuccess }: {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          {showDiscogsUrl ? (
+            <div id="discogs-url-field" className="min-w-0 flex-1">
+              <div className="space-y-2">
+                <Label htmlFor="discogs-url-input">{t.discogsUrl}</Label>
+                <Input
+                  id="discogs-url-input"
+                  type="url"
+                  value={discogsUrlInput}
+                  onChange={(event) => setDiscogsUrlInput(event.target.value)}
+                  placeholder="https://www.discogs.com/release/..."
+                />
+              </div>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              aria-expanded={false}
+              aria-controls="discogs-url-field"
+              onClick={() => setShowDiscogsUrl(true)}
+            >
+              {t.manualDiscogsUrl}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            className="shrink-0 border-black bg-black text-white hover:bg-black/90 hover:text-white"
+            onClick={() => void handleDiscogsSearch()}
+            disabled={discogsSearching}
+          >
+            {discogsSearching ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Search aria-hidden="true" />
+            )}
+            {discogsSearching
+              ? t.searchingDiscogs
+              : showDiscogsUrl
+                ? t.searchDiscogsByUrl
+                : t.searchDiscogs}
+          </Button>
+          {showDiscogsUrl && (
+            <Button type="button" variant="ghost" onClick={() => setShowDiscogsUrl(false)}>
+              {t.hideDiscogsUrl}
+            </Button>
+          )}
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField control={form.control} name="artist" render={({ field }) => (
             <FormItem><FormLabel>{t.artist}</FormLabel><FormControl><Input placeholder={t.artistPlaceholder} {...field} /></FormControl><FormMessage /></FormItem>
@@ -318,55 +367,6 @@ export function RecordForm({ language, record, onSuccess }: {
         </div>
 
         <div className="space-y-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            {showDiscogsUrl ? (
-              <div id="discogs-url-field" className="min-w-0 flex-1">
-                <div className="space-y-2">
-                  <Label htmlFor="discogs-url-input">{t.discogsUrl}</Label>
-                  <Input
-                    id="discogs-url-input"
-                    type="url"
-                    value={discogsUrlInput}
-                    onChange={(event) => setDiscogsUrlInput(event.target.value)}
-                    placeholder="https://www.discogs.com/release/..."
-                  />
-                </div>
-              </div>
-            ) : (
-              <Button
-                type="button"
-                variant="outline"
-                aria-expanded={false}
-                aria-controls="discogs-url-field"
-                onClick={() => setShowDiscogsUrl(true)}
-              >
-                {t.manualDiscogsUrl}
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              className="shrink-0 border-black bg-black text-white hover:bg-black/90 hover:text-white"
-              onClick={() => void handleDiscogsSearch()}
-              disabled={discogsSearching}
-            >
-              {discogsSearching ? (
-                <LoaderCircle className="animate-spin" aria-hidden="true" />
-              ) : (
-                <Search aria-hidden="true" />
-              )}
-              {discogsSearching
-                ? t.searchingDiscogs
-                : showDiscogsUrl
-                  ? t.searchDiscogsByUrl
-                  : t.searchDiscogs}
-            </Button>
-            {showDiscogsUrl && (
-              <Button type="button" variant="ghost" onClick={() => setShowDiscogsUrl(false)}>
-                {t.hideDiscogsUrl}
-              </Button>
-            )}
-          </div>
           {selectedDiscogsTitle && (
             <p className="text-sm text-muted-foreground">
               {t.discogsReleaseSelected} {selectedDiscogsTitle}

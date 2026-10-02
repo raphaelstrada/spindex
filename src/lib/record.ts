@@ -1,5 +1,6 @@
 export type VinylRecord = {
   id: string
+  collection_owner?: string | null
   artist: string | null
   title: string | null
   year_pressed: number | null

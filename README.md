@@ -16,6 +16,34 @@ Discogs database search and image retrieval require authentication. In your [Dis
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## Photo Record Identification
+
+Photo identification uses Gemini 3.8 Flash through a Supabase Edge Function. Resized images are sent to Google for identification and are not stored by the app. The API key stays server-side and is never included in the frontend bundle.
+
+### GitHub Actions setup
+
+In the repository, open **Settings > Secrets and variables > Actions** and add:
+
+- Repository secret `GEMINI_API_KEY`: create the key in [Google AI Studio](https://aistudio.google.com/apikey).
+- Repository secret `SUPABASE_ACCESS_TOKEN`: create a personal access token in the Supabase account settings.
+- Repository variable `SUPABASE_PROJECT_REF`: the project reference from the Supabase project URL.
+
+The existing `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` build secrets remain unchanged. On a push to `main`, or a manual run from **Actions > Deploy to GitHub Pages > Run workflow**, the workflow copies `GEMINI_API_KEY` into Supabase Edge Function secrets and deploys `identify-records`.
+
+### Local Edge Function
+
+For local Supabase development, create `supabase/functions/.env` with:
+
+```env
+GEMINI_API_KEY=your_google_ai_studio_key
+```
+
+This file is ignored by Git. Serve the function locally with:
+
+```sh
+npx supabase functions serve identify-records --env-file supabase/functions/.env
+```
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
