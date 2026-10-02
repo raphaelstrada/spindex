@@ -54,24 +54,58 @@ Deno.serve(async (request) => {
       })),
     ]
 
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent', {
-      method: 'POST',
-      headers: {
-        'x-goog-api-key': apiKey,
-        'Content-Type': 'application/json',
+    const requestBody = JSON.stringify({
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: 'application/json',
       },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: 'application/json',
-        },
-      }),
     })
+    let response: Response | null = null
 
-    if (!response.ok) {
-      console.error('Gemini image identification failed with status:', response.status)
-      return jsonResponse({ error: `AI identification failed (HTTP ${response.status}).` }, 502)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent', {
+          method: 'POST',
+          headers: {
+            'x-goog-api-key': apiKey,
+            'Content-Type': 'application/json',
+          },
+          body: requestBody,
+        })
+      } catch (error) {
+        if (attempt === 2) {
+          console.error('Gemini request failed after retries:', error instanceof Error ? error.message : 'Network error')
+          return jsonResponse({ error: 'Could not reach Gemini after three attempts. Please try again.' }, 502)
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt + Math.random() * 250))
+        continue
+      }
+
+      if (response.ok) break
+
+      const shouldRetry = [408, 429, 500, 502, 503, 504].includes(response.status)
+      if (!shouldRetry || attempt === 2) break
+
+      const retryAfter = Number(response.headers.get('retry-after'))
+      await response.body?.cancel()
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 5000)
+        : 1000 * 2 ** attempt + Math.random() * 250
+      await new Promise((resolve) => setTimeout(resolve, waitMs))
+    }
+
+    if (!response?.ok) {
+      const providerError = await response?.json().catch(() => null) as { error?: { message?: string } } | null
+      const providerMessage = providerError?.error?.message?.slice(0, 300)
+      const status = response?.status ?? 502
+      console.error('Gemini image identification failed:', { status, message: providerMessage })
+      return jsonResponse({
+        error: providerMessage
+          ? `Gemini returned HTTP ${status}: ${providerMessage}`
+          : `Gemini identification failed after retries (HTTP ${status}).`,
+      }, status >= 500 ? 503 : status)
     }
 
     const payload = await response.json()

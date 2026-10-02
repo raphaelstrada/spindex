@@ -26,7 +26,7 @@ In the repository, open **Settings > Secrets and variables > Actions** and add:
 
 - Repository secret `GEMINI_API_KEY`: create the key in [Google AI Studio](https://aistudio.google.com/apikey).
 - Repository secret `SUPABASE_ACCESS_TOKEN`: create a personal access token in the Supabase account settings.
-- Repository variable `SUPABASE_PROJECT_REF`: the project reference from the Supabase project URL.
+- Optional repository variable `SUPABASE_PROJECT_REF`: override the project reference. If omitted, the workflow uses this app's Supabase project ref.
 
 The existing `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` build secrets remain unchanged. On a push to `main`, or a manual run from **Actions > Deploy to GitHub Pages > Run workflow**, the workflow copies `GEMINI_API_KEY` into Supabase Edge Function secrets and deploys `identify-records`.
 
