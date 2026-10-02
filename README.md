@@ -47,39 +47,18 @@ In the repository, open **Settings > Secrets and variables > Actions** and add:
 
 The existing `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` build secrets remain unchanged. On a push to `main`, or a manual run from **Actions > Deploy to GitHub Pages > Run workflow**, the workflow copies `GEMINI_API_KEY` into Supabase Edge Function secrets and deploys `identify-records`.
 
-### Facebook Marketplace bridge
+### Marketplace Helper Downloads
 
-Marketplace reading runs locally so Facebook session cookies never leave this computer. There is no Facebook API token: each person signs in manually in a local Chromium window, and the helper saves that person's Playwright session to `~/.vinyl-catalog/fb_auth.json`. The bridge visits only Marketplace item URLs, reads listing text from the main panel, and extracts photos only from the configured main-image XPath.
+The desktop helper is built for macOS and Windows and published automatically after a successful push to `main`:
 
-Clone or download this repository, open a terminal in its folder, and create a local Python environment.
+- [Download for macOS](https://github.com/raphaelstrada/vinyl-catalog/releases/download/marketplace-helper-latest/MarketplaceHelper-macOS.zip)
+- [Download for Windows](https://github.com/raphaelstrada/vinyl-catalog/releases/download/marketplace-helper-latest/MarketplaceHelper-Windows.zip)
 
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install playwright
-python -m playwright install chromium
-python marketplace_login.py
-```
+Download and extract the matching ZIP, then open the app. Google Chrome or Microsoft Edge must be installed. These builds are unsigned, so continue only with a copy downloaded from the official project Releases. On macOS, Control-click the app, choose **Open**, then confirm **Open** again. On Windows SmartScreen, choose **More info > Run anyway**. The helper opens Facebook for a manual sign-in, saves the session only on that computer, starts the local bridge, and provides a copy-token button. No repository clone, Python commands, or Facebook API token are needed for normal use. GitHub access is required if this repository is private.
 
-The login helper opens Chromium. Sign in to your own Facebook account there, finish any checks, then return to the terminal and press Enter. The session file is stored outside the repository and is never sent to the app.
+### Local Marketplace Helper Development
 
-For Windows PowerShell, use these environment setup commands instead:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install playwright
-python -m playwright install chromium
-python marketplace_login.py
-```
-
-Then start the bridge in the same activated environment:
-
-```sh
-python marketplace_bridge.py
-```
-
-Keep that terminal open. Copy the temporary token it prints into **Upload a Picture > Link to Marketplace**, paste one listing URL per line, and fetch the photos. The helper accepts up to 10 listings and returns at most 5 main-panel photos per listing; it binds only to `127.0.0.1`. Never commit the Facebook session or share the temporary bridge token.
+The source helper uses `~/.vinyl-catalog/fb_auth.json` for the local Playwright session; cookies are never sent to the web app or Supabase. To run it from source, use a Python environment with Playwright installed, then run `python marketplace_login.py` followed by `python marketplace_bridge.py`. It accepts up to 10 listing URLs and returns up to 5 images from the configured main-image area per listing. Never commit or share the Facebook session file or temporary bridge token.
 
 ### Local Edge Function
 

@@ -641,7 +641,7 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
             <li>
               {t.marketplaceStepGetFiles}{' '}
               <a
-                href="https://github.com/raphaelstrada/vinyl-catalog"
+                href="https://github.com/raphaelstrada/vinyl-catalog/releases/tag/marketplace-helper-latest"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-medium text-primary underline underline-offset-4"
@@ -649,23 +649,12 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
                 {t.marketplaceHelperRepository}
               </a>
             </li>
-            <li>
-              {t.marketplaceStepInstall}
-              <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-3 text-xs"><code>{`python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install playwright
-python -m playwright install chromium`}</code></pre>
-              <p className="mt-3 text-xs font-medium">{t.marketplaceWindowsLabel}</p>
-              <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-3 text-xs"><code>{`py -m venv .venv
-.\u005c.venv\u005cScripts\u005cActivate.ps1
-python -m pip install playwright
-python -m playwright install chromium`}</code></pre>
-            </li>
-            <li>{t.marketplaceStepLogin}<br /><code>python marketplace_login.py</code></li>
-            <li>{t.marketplaceStepRunBridge}<br /><code>python marketplace_bridge.py</code></li>
+            <li>{t.marketplaceStepLogin}</li>
+            <li>{t.marketplaceStepRunBridge}</li>
             <li>{t.marketplaceStepPaste}</li>
           </ol>
           <p className="text-xs text-muted-foreground">{t.marketplaceNoFacebookApiToken}</p>
+          <p className="text-xs text-muted-foreground">{t.marketplaceUnsignedWarning}</p>
           <p className="text-xs text-muted-foreground">{t.marketplaceLocalNetworkPermission}</p>
           <div className="space-y-2">
             <Label htmlFor="marketplace-bridge-token">{t.marketplaceBridgeToken}</Label>

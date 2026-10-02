@@ -1,0 +1,99 @@
+name: Build Marketplace Helper
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["marketplace-helper-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            package: macOS
+          - os: windows-latest
+            package: Windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install helper dependencies
+        run: python -m pip install -r requirements-marketplace-helper.txt
+
+      - name: Build desktop helper
+        run: >-
+          python -m PyInstaller --noconfirm --clean --windowed
+          --name VinylCatalogMarketplaceHelper
+          --collect-all playwright --collect-all greenlet
+          marketplace_desktop.py
+
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent dist/VinylCatalogMarketplaceHelper.app dist/MarketplaceHelper-macOS.zip
+
+      - name: Package Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/VinylCatalogMarketplaceHelper -DestinationPath dist/MarketplaceHelper-Windows.zip
+
+      - name: Upload downloadable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MarketplaceHelper-${{ matrix.package }}
+          path: dist/MarketplaceHelper-${{ matrix.package }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/marketplace-helper-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform packages
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release downloads
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*.zip
+
+  publish-latest:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform packages
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish latest downloads
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: marketplace-helper-latest
+          name: Marketplace Helper (latest)
+          target_commitish: main
+          prerelease: true
+          make_latest: false
+          overwrite_files: true
+          files: release-assets/*.zip
