@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { ArrowRight, Disc3, LoaderCircle, Search } from 'lucide-react'
+import { ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { getDiscogsLowestPrice, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import { Button } from '@/components/ui/button'
@@ -54,10 +54,13 @@ function createFormSchema(language: Language) {
 type FormInput = z.input<ReturnType<typeof createFormSchema>>
 type FormValues = z.output<ReturnType<typeof createFormSchema>>
 
-export function RecordForm({ language, record, initialValues, onSuccess }: {
+export function RecordForm({ language, record, initialValues, showTopSaveButton = false, onUploadPicture, onUploadOriginalImage, onSuccess }: {
   language: Language
   record?: VinylRecord
   initialValues?: Partial<VinylRecord>
+  showTopSaveButton?: boolean
+  onUploadPicture?: () => void
+  onUploadOriginalImage?: () => Promise<string>
   onSuccess?: (values: FormValues) => void
 }) {
   const t = translations[language].form
@@ -88,10 +91,12 @@ export function RecordForm({ language, record, initialValues, onSuccess }: {
       country_pressed: record?.country_pressed ?? initialValues?.country_pressed ?? '',
       media_condition: record?.media_condition ?? initialValues?.media_condition ?? 'VG+',
       sleeve_condition: record?.sleeve_condition ?? initialValues?.sleeve_condition ?? 'VG+',
-      is_original: record?.is_original ?? true,
+      is_original: record?.is_original ?? initialValues?.is_original ?? true,
       is_special_edition: record?.is_special_edition ?? false,
       special_edition_reason: record?.special_edition_reason ?? '',
-      sell_possibility: record?.sell_possibility ?? false,
+      sell_possibility: record
+        ? record.sell_possibility ?? false
+        : initialValues?.sell_possibility ?? true,
       sold: record?.sold ?? false,
       discogs_lowest_price: record?.discogs_lowest_price ?? initialValues?.discogs_lowest_price ?? undefined,
       notes: record?.notes ?? initialValues?.notes ?? '',
@@ -102,9 +107,29 @@ export function RecordForm({ language, record, initialValues, onSuccess }: {
   })
 
   async function onSubmit(values: FormValues) {
+    let originalImageUrl: string | undefined
+    if (onUploadOriginalImage) {
+      try {
+        originalImageUrl = await onUploadOriginalImage()
+      } catch (error) {
+        alert(`${t.databaseError} ${error instanceof Error ? error.message : ''}`)
+        return
+      }
+    }
+
+    const valuesToSave = originalImageUrl
+      ? { ...values, original_image_url: originalImageUrl }
+      : values
+    const databaseValues = {
+      ...valuesToSave,
+      record_type: valuesToSave.record_type || null,
+      record_size: valuesToSave.record_size || null,
+      media_condition: valuesToSave.media_condition || null,
+      sleeve_condition: valuesToSave.sleeve_condition || null,
+    }
     const { error } = record
-      ? await supabase.from('vinyl_records').update(values).eq('id', record.id)
-      : await supabase.from('vinyl_records').insert([{ ...values, collection_owner: 'Raphael' }])
+      ? await supabase.from('vinyl_records').update(databaseValues).eq('id', record.id)
+      : await supabase.from('vinyl_records').insert([{ ...databaseValues, collection_owner: 'Raphael' }])
     
     if (error) {
       console.error('Failed to insert record:', error.message)
@@ -112,7 +137,7 @@ export function RecordForm({ language, record, initialValues, onSuccess }: {
       return
     }
     
-    onSuccess?.(values)
+    onSuccess?.(valuesToSave)
   }
 
   async function handleDiscogsSearch(useFilters = false) {
@@ -296,7 +321,18 @@ export function RecordForm({ language, record, initialValues, onSuccess }: {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        {showTopSaveButton && (
+          <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+            {record ? t.saveChanges : t.save}
+          </Button>
+        )}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          {onUploadPicture && (
+            <Button type="button" variant="default" onClick={onUploadPicture}>
+              <Images aria-hidden="true" />
+              {translations[language].app.upload}
+            </Button>
+          )}
           {showDiscogsUrl ? (
             <div id="discogs-url-field" className="min-w-0 flex-1">
               <div className="space-y-2">
@@ -575,7 +611,9 @@ export function RecordForm({ language, record, initialValues, onSuccess }: {
           )} />
         </div>
 
-        <Button type="submit" className="mt-4 w-full">{record ? t.saveChanges : t.save}</Button>
+        <Button type="submit" className="mt-4 w-full" disabled={form.formState.isSubmitting}>
+          {record ? t.saveChanges : t.save}
+        </Button>
       </form>
       <Dialog
         open={selectedDiscogsRelease !== null}

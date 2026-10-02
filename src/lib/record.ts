@@ -6,6 +6,7 @@ export type VinylRecord = {
   year_pressed: number | null
   genre: string | null
   image_url: string | null
+  original_image_url?: string | null
   source_url?: string | null
   record_label?: string | null
   sub_genre?: string | null

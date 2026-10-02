@@ -62,8 +62,9 @@ Deno.serve(async (request) => {
       },
     })
     let response: Response | null = null
+    const maxAttempts = 5
 
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent', {
           method: 'POST',
@@ -74,9 +75,9 @@ Deno.serve(async (request) => {
           body: requestBody,
         })
       } catch (error) {
-        if (attempt === 2) {
+        if (attempt === maxAttempts - 1) {
           console.error('Gemini request failed after retries:', error instanceof Error ? error.message : 'Network error')
-          return jsonResponse({ error: 'Could not reach Gemini after three attempts. Please try again.' }, 502)
+          return jsonResponse({ error: `Could not reach Gemini after ${maxAttempts} attempts. Please try again.` }, 502)
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt + Math.random() * 250))
@@ -86,12 +87,12 @@ Deno.serve(async (request) => {
       if (response.ok) break
 
       const shouldRetry = [408, 429, 500, 502, 503, 504].includes(response.status)
-      if (!shouldRetry || attempt === 2) break
+      if (!shouldRetry || attempt === maxAttempts - 1) break
 
       const retryAfter = Number(response.headers.get('retry-after'))
       await response.body?.cancel()
       const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(retryAfter * 1000, 5000)
+        ? Math.min(retryAfter * 1000, 8000)
         : 1000 * 2 ** attempt + Math.random() * 250
       await new Promise((resolve) => setTimeout(resolve, waitMs))
     }

@@ -99,15 +99,18 @@ function releaseFormValues(release: DiscogsRelease | undefined, detected: Detect
   if (!release) return { artist: detected.artist, title: detected.title, year_pressed: detected.year }
 
   return {
-    artist: release.artist || detected.artist,
-    title: release.releaseTitle || detected.title,
-    year_pressed: release.year ?? detected.year,
+    artist: release.artist,
+    title: release.releaseTitle,
+    year_pressed: release.year ?? undefined,
     country_pressed: release.country ?? '',
     record_label: release.label[0] ?? '',
     genre: release.genre ?? '',
     sub_genre: release.subGenre ?? '',
-    record_type: release.recordType ?? 'LP',
-    record_size: release.recordSize ?? '12"',
+    record_type: release.recordType ?? '',
+    record_size: release.recordSize ?? '',
+    media_condition: '',
+    sleeve_condition: '',
+    is_original: false,
     discogs_link: release.url,
     image_url: release.coverImage,
   }
@@ -130,6 +133,7 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
   const uploadInput = useRef<HTMLInputElement>(null)
   const cameraInput = useRef<HTMLInputElement>(null)
   const previewUrls = useRef(new Set<string>())
+  const uploadedPhotoUrls = useRef(new Map<string, string>())
   const activeRecord = records[currentIndex]
   const selectedRelease = activeRecord?.candidates.find((release) => String(release.id) === activeRecord.selectedReleaseId)
   const initialValues = useMemo(
@@ -160,6 +164,37 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
     URL.revokeObjectURL(photo.previewUrl)
     previewUrls.current.delete(photo.previewUrl)
     setPhotos((current) => current.filter((item) => item.id !== photo.id))
+  }
+
+  async function uploadOriginalPhoto(photo: Photo) {
+    const cachedUrl = uploadedPhotoUrls.current.get(photo.id)
+    if (cachedUrl) return cachedUrl
+
+    const extensions: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'image/heic': 'heic',
+      'image/heif': 'heif',
+    }
+    const extension = extensions[photo.file.type]
+    if (!extension) throw new Error(t.unsupportedOriginalPhotoType)
+
+    const path = `${photo.id}.${extension}`
+    const { error: uploadError } = await supabase.storage
+      .from('vinyl-originals')
+      .upload(path, photo.file, {
+        cacheControl: '31536000',
+        contentType: photo.file.type,
+        upsert: false,
+      })
+
+    if (uploadError) throw new Error(uploadError.message)
+
+    const { data } = supabase.storage.from('vinyl-originals').getPublicUrl(path)
+    uploadedPhotoUrls.current.set(photo.id, data.publicUrl)
+    return data.publicUrl
   }
 
   async function identifyRecords() {
@@ -354,6 +389,8 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
             key={`${activeRecord.id}-${activeRecord.selectedReleaseId}`}
             language={language}
             initialValues={initialValues}
+            showTopSaveButton={Boolean(selectedRelease)}
+            onUploadOriginalImage={sourcePhoto ? () => uploadOriginalPhoto(sourcePhoto) : undefined}
             onSuccess={() => advanceRecord(true)}
           />
         </div>

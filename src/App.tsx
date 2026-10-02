@@ -66,7 +66,7 @@ export default function App() {
           </DropdownMenu>
           <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
-              <Button>{t.app.addRecord}</Button>
+              <Button variant="outline">{t.app.addRecord}</Button>
             </DialogTrigger>
             <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[600px]">
               <DialogHeader>
@@ -74,6 +74,10 @@ export default function App() {
               </DialogHeader>
               <RecordForm
                 language={language}
+                onUploadPicture={() => {
+                  setIsOpen(false)
+                  setIsPhotoImportOpen(true)
+                }}
                 onSuccess={() => {
                   setIsOpen(false)
                   setRecordsVersion((version) => version + 1)
@@ -83,7 +87,7 @@ export default function App() {
           </Dialog>
           <Dialog open={isPhotoImportOpen} onOpenChange={setIsPhotoImportOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline">
+              <Button>
                 <Images aria-hidden="true" />
                 {t.app.uploadPicture}
               </Button>

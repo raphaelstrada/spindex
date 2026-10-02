@@ -16,6 +16,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   CircleDollarSign,
+  Disc3,
   LoaderCircle,
   Minus,
   Pencil,
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react'
 import { RecordForm } from '@/components/RecordForm'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -78,6 +80,10 @@ function matchesGlobalSearch(record: VinylRecord, query: string, language: Langu
   )
 }
 
+function hasNoDiscogsPrice(record: VinylRecord) {
+  return record.discogs_lowest_price === null || record.discogs_lowest_price === undefined
+}
+
 export function DataTable({ language, recordsVersion }: { language: Language; recordsVersion: number }) {
   const [data, setData] = useState<VinylRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -87,14 +93,36 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const [globalSearch, setGlobalSearch] = useState('')
   const [advancedFilters, setAdvancedFilters] = useState<Record<string, string>>({})
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 100 })
+  const [previewingRecord, setPreviewingRecord] = useState<VinylRecord | null>(null)
   const [editingRecord, setEditingRecord] = useState<VinylRecord | null>(null)
   const [deletingRecord, setDeletingRecord] = useState<VinylRecord | null>(null)
   const [pendingActionId, setPendingActionId] = useState<string | null>(null)
   const [pendingPriceId, setPendingPriceId] = useState<string | null>(null)
+  const [selectedPriceIds, setSelectedPriceIds] = useState<Set<string>>(new Set())
+  const [isBatchPriceLoading, setIsBatchPriceLoading] = useState(false)
+  const [batchPriceProgress, setBatchPriceProgress] = useState<{ current: number; total: number } | null>(null)
+  const [batchPriceSummary, setBatchPriceSummary] = useState<string | null>(null)
   const t = translations[language].table
   const filterUiText = language === 'pt'
     ? { selectValue: translations.pt.table.selectFilterValue, clearSelection: translations.pt.table.clearFilterSelection, resetAll: translations.pt.table.resetAll }
     : { selectValue: translations.en.table.selectFilterValue, clearSelection: translations.en.table.clearFilterSelection, resetAll: translations.en.table.resetAll }
+  const priceUiText = language === 'pt'
+    ? {
+        selectAllUnpriced: translations.pt.table.selectAllUnpriced,
+        selectUnpricedRecord: translations.pt.table.selectUnpricedRecord,
+        recordsSelected: translations.pt.table.recordsSelected,
+        autoFillSelectedPrices: translations.pt.table.autoFillSelectedPrices,
+        clearPriceSelection: translations.pt.table.clearPriceSelection,
+        batchPriceSummary: translations.pt.table.batchPriceSummary,
+      }
+    : {
+        selectAllUnpriced: translations.en.table.selectAllUnpriced,
+        selectUnpricedRecord: translations.en.table.selectUnpricedRecord,
+        recordsSelected: translations.en.table.recordsSelected,
+        autoFillSelectedPrices: translations.en.table.autoFillSelectedPrices,
+        clearPriceSelection: translations.en.table.clearPriceSelection,
+        batchPriceSummary: translations.en.table.batchPriceSummary,
+      }
 
   useEffect(() => {
     async function fetchRecords() {
@@ -153,62 +181,67 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     setPendingActionId(null)
   }
 
+  async function updateDiscogsPrice(record: VinylRecord): Promise<'updated' | 'no-release' | 'no-price'> {
+    let releaseId = getDiscogsReleaseId(record.discogs_link)
+      ?? getDiscogsReleaseId(record.image_url)
+
+    if (!releaseId && record.artist && record.title) {
+      const normalize = (value: string) => value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\band\b/g, ' ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+      const releases = await searchDiscogsReleases(record.artist, record.title, undefined, {
+        year: record.year_pressed ?? undefined,
+      })
+      const exactMatches = releases.filter((release) =>
+        normalize(release.artist) === normalize(record.artist ?? '')
+        && normalize(release.releaseTitle) === normalize(record.title ?? ''),
+      )
+
+      const score = (release: typeof exactMatches[number]) =>
+        Number(record.year_pressed !== null && release.year === record.year_pressed) * 2
+        + Number(Boolean(record.country_pressed && release.country === record.country_pressed))
+        + Number(Boolean(record.record_label && release.label.some((label) => normalize(label) === normalize(record.record_label ?? ''))))
+      const bestScore = Math.max(-1, ...exactMatches.map(score))
+      const bestMatches = exactMatches.filter((release) => score(release) === bestScore)
+
+      if (bestMatches.length === 1) releaseId = bestMatches[0].id
+    }
+
+    if (!releaseId) return 'no-release'
+
+    const stats = await getDiscogsLowestPrice(releaseId)
+    if (stats.lowestPrice === null) return 'no-price'
+
+    const { error } = await supabase
+      .from('vinyl_records')
+      .update({ discogs_lowest_price: stats.lowestPrice })
+      .eq('id', record.id)
+
+    if (error) throw new Error(error.message)
+
+    setData((current) => current.map((item) =>
+      item.id === record.id ? { ...item, discogs_lowest_price: stats.lowestPrice } : item,
+    ))
+    return 'updated'
+  }
+
   async function autoFillDiscogsPrice(record: VinylRecord) {
     setPendingPriceId(record.id)
     try {
-      let releaseId = getDiscogsReleaseId(record.discogs_link)
-        ?? getDiscogsReleaseId(record.image_url)
-
-      if (!releaseId && record.artist && record.title) {
-        const normalize = (value: string) => value
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase()
-          .replace(/\band\b/g, ' ')
-          .replace(/[^a-z0-9]+/g, ' ')
-          .trim()
-        const releases = await searchDiscogsReleases(record.artist, record.title, undefined, {
-          year: record.year_pressed ?? undefined,
+      const result = await updateDiscogsPrice(record)
+      if (result === 'no-release') alert(t.noExactDiscogsRelease)
+      if (result === 'no-price') alert(t.noDiscogsPrice)
+      if (result === 'updated') {
+        setSelectedPriceIds((current) => {
+          const next = new Set(current)
+          next.delete(record.id)
+          return next
         })
-        const exactMatches = releases.filter((release) =>
-          normalize(release.artist) === normalize(record.artist ?? '')
-          && normalize(release.releaseTitle) === normalize(record.title ?? ''),
-        )
-
-        const score = (release: typeof exactMatches[number]) =>
-          Number(record.year_pressed !== null && release.year === record.year_pressed) * 2
-          + Number(Boolean(record.country_pressed && release.country === record.country_pressed))
-          + Number(Boolean(record.record_label && release.label.some((label) => normalize(label) === normalize(record.record_label ?? ''))))
-        const bestScore = Math.max(-1, ...exactMatches.map(score))
-        const bestMatches = exactMatches.filter((release) => score(release) === bestScore)
-
-        if (bestMatches.length === 1) releaseId = bestMatches[0].id
       }
-
-      if (!releaseId) {
-        alert(t.noExactDiscogsRelease)
-        return
-      }
-
-      const stats = await getDiscogsLowestPrice(releaseId)
-      if (stats.lowestPrice === null) {
-        alert(t.noDiscogsPrice)
-        return
-      }
-
-      const { error } = await supabase
-        .from('vinyl_records')
-        .update({ discogs_lowest_price: stats.lowestPrice })
-        .eq('id', record.id)
-
-      if (error) {
-        alert(`${t.updateFailed} ${error.message}`)
-        return
-      }
-
-      setData((current) => current.map((item) =>
-        item.id === record.id ? { ...item, discogs_lowest_price: stats.lowestPrice } : item,
-      ))
     } catch (error) {
       alert(`${t.updateFailed} ${error instanceof Error ? error.message : ''}`)
     } finally {
@@ -234,6 +267,9 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       return recordValue.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
     })
   }), [data, normalizedSearch, advancedFilters, language])
+  const unpricedFilteredRecords = filteredData.filter(hasNoDiscogsPrice)
+  const selectedFilteredUnpricedCount = unpricedFilteredRecords.filter((record) => selectedPriceIds.has(record.id)).length
+  const selectedUnpricedRecords = data.filter((record) => selectedPriceIds.has(record.id) && hasNoDiscogsPrice(record))
 
   const dropdownOptions = useMemo<Record<string, string[]>>(() => {
     const options: Record<string, string[]> = {}
@@ -289,6 +325,63 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     setPagination((current) => ({ ...current, pageIndex: 0 }))
   }
 
+  function toggleAllUnpriced(checked: boolean) {
+    setBatchPriceSummary(null)
+    setSelectedPriceIds((current) => {
+      const next = new Set(current)
+      for (const record of unpricedFilteredRecords) {
+        if (checked) next.add(record.id)
+        else next.delete(record.id)
+      }
+      return next
+    })
+  }
+
+  async function autoFillSelectedPrices() {
+    const recordsToUpdate = selectedUnpricedRecords
+    if (recordsToUpdate.length === 0 || isBatchPriceLoading || pendingPriceId !== null) return
+
+    setIsBatchPriceLoading(true)
+    setBatchPriceSummary(null)
+    let updated = 0
+    let unavailable = 0
+    let failed = 0
+    const updatedRecordIds = new Set<string>()
+
+    try {
+      for (const [index, record] of recordsToUpdate.entries()) {
+        setPendingPriceId(record.id)
+        setBatchPriceProgress({ current: index + 1, total: recordsToUpdate.length })
+        try {
+          const result = await updateDiscogsPrice(record)
+          if (result === 'updated') {
+            updated += 1
+            updatedRecordIds.add(record.id)
+          } else unavailable += 1
+        } catch (error) {
+          failed += 1
+          console.error(`Discogs price lookup failed for record ${record.id}:`, error)
+        } finally {
+          setPendingPriceId(null)
+        }
+      }
+
+      setBatchPriceSummary(priceUiText.batchPriceSummary
+        .replace('{updated}', String(updated))
+        .replace('{unavailable}', String(unavailable))
+        .replace('{failed}', String(failed)))
+      setSelectedPriceIds((current) => {
+        const next = new Set(current)
+        updatedRecordIds.forEach((id) => next.delete(id))
+        return next
+      })
+    } finally {
+      setPendingPriceId(null)
+      setBatchPriceProgress(null)
+      setIsBatchPriceLoading(false)
+    }
+  }
+
   const columns: ColumnDef<VinylRecord>[] = [
     {
       id: 'expand',
@@ -312,9 +405,17 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       accessorKey: 'image_url',
       header: t.cover,
       cell: ({ row }) => {
-        const url = row.original.image_url
+        const url = row.original.image_url ?? row.original.original_image_url
         return url ? (
-          <img src={url} alt={t.cover} className="h-12 w-12 rounded-sm object-cover shadow-sm" />
+          <button
+            type="button"
+            className="block rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`${t.viewCover}: ${row.original.artist ?? ''} - ${row.original.title ?? ''}`}
+            title={t.viewCover}
+            onClick={() => setPreviewingRecord(row.original)}
+          >
+            <img src={url} alt={t.cover} className="h-12 w-12 rounded-sm object-cover shadow-sm" />
+          </button>
         ) : (
           <div className="flex h-12 w-12 items-center justify-center rounded-sm bg-muted text-center text-[10px] leading-tight text-muted-foreground">{t.noImage}</div>
         )
@@ -324,6 +425,43 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     { accessorKey: 'title', header: t.title },
     { accessorKey: 'year_pressed', header: t.year },
     { accessorKey: 'genre', header: t.genre },
+    {
+      id: 'selectUnpriced',
+      header: () => (
+        <Checkbox
+          aria-label={priceUiText.selectAllUnpriced}
+          title={priceUiText.selectAllUnpriced}
+          checked={unpricedFilteredRecords.length > 0 && selectedFilteredUnpricedCount === unpricedFilteredRecords.length
+            ? true
+            : selectedFilteredUnpricedCount > 0 ? 'indeterminate' : false}
+          disabled={unpricedFilteredRecords.length === 0 || isBatchPriceLoading || pendingPriceId !== null}
+          onCheckedChange={(checked) => toggleAllUnpriced(checked === true)}
+        />
+      ),
+      enableSorting: false,
+      size: 40,
+      cell: ({ row }) => {
+        const record = row.original
+        if (!hasNoDiscogsPrice(record)) return null
+
+        return (
+          <Checkbox
+            aria-label={`${priceUiText.selectUnpricedRecord}: ${record.artist ?? ''} - ${record.title ?? ''}`}
+            checked={selectedPriceIds.has(record.id)}
+            disabled={isBatchPriceLoading || pendingPriceId !== null}
+            onCheckedChange={(checked) => {
+              setBatchPriceSummary(null)
+              setSelectedPriceIds((current) => {
+                const next = new Set(current)
+                if (checked === true) next.add(record.id)
+                else next.delete(record.id)
+                return next
+              })
+            }}
+          />
+        )
+      },
+    },
     {
       accessorKey: 'discogs_lowest_price',
       header: t.discogsLowestPrice,
@@ -360,6 +498,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         const record = row.original
         const isPending = pendingActionId === record.id
         let sourceUrl: string | null = null
+        let discogsUrl: string | null = null
         try {
           const parsedSourceUrl = new URL(record.source_url ?? '')
           if (parsedSourceUrl.protocol === 'http:' || parsedSourceUrl.protocol === 'https:') {
@@ -367,6 +506,16 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           }
         } catch {
           sourceUrl = null
+        }
+        try {
+          const parsedDiscogsUrl = new URL(record.discogs_link ?? '')
+          const isDiscogsHost = parsedDiscogsUrl.hostname === 'discogs.com'
+            || parsedDiscogsUrl.hostname.endsWith('.discogs.com')
+          if (isDiscogsHost && (parsedDiscogsUrl.protocol === 'http:' || parsedDiscogsUrl.protocol === 'https:')) {
+            discogsUrl = parsedDiscogsUrl.href
+          }
+        } catch {
+          discogsUrl = null
         }
 
         return (
@@ -393,6 +542,18 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               >
                 <span aria-hidden="true" className="flex h-4 w-4 items-end justify-center rounded-[3px] bg-muted-foreground text-[14px] font-bold leading-[14px] text-background">f</span>
               </Button>
+            )}
+            {discogsUrl && (
+              <a
+                href={discogsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={t.openDiscogsRelease}
+                title={t.openDiscogsRelease}
+              >
+                <Disc3 aria-hidden="true" />
+              </a>
             )}
             <Button
               variant="ghost"
@@ -549,6 +710,35 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         </details>
       </div>
 
+      {(selectedUnpricedRecords.length > 0 || isBatchPriceLoading) && (
+        <div className="mb-3 flex flex-col gap-3 rounded-md border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {isBatchPriceLoading && batchPriceProgress
+              ? `${t.fetchingDiscogsPrice} ${batchPriceProgress.current}/${batchPriceProgress.total}`
+              : `${selectedUnpricedRecords.length} ${priceUiText.recordsSelected}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              disabled={selectedUnpricedRecords.length === 0 || isBatchPriceLoading || pendingPriceId !== null}
+              onClick={() => void autoFillSelectedPrices()}
+            >
+              {isBatchPriceLoading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <CircleDollarSign aria-hidden="true" />}
+              {isBatchPriceLoading ? t.fetchingDiscogsPrice : priceUiText.autoFillSelectedPrices}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={isBatchPriceLoading}
+              onClick={() => setSelectedPriceIds(new Set())}
+            >
+              {priceUiText.clearPriceSelection}
+            </Button>
+          </div>
+        </div>
+      )}
+      {batchPriceSummary && <p className="mb-3 text-sm text-muted-foreground" role="status">{batchPriceSummary}</p>}
+
       <div className="overflow-hidden rounded-md border bg-card shadow-sm">
         <Table>
           <TableHeader className="bg-muted/70">
@@ -617,7 +807,18 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
                                 <dt className="text-xs font-medium text-muted-foreground">
                                   {t.detailLabels[key as keyof typeof t.detailLabels] ?? key.replace(/_/g, ' ')}
                                 </dt>
-                                <dd className="break-words text-sm">{displayDetailValue(value)}</dd>
+                                <dd className="break-words text-sm">
+                                  {key === 'original_image_url' && typeof value === 'string' ? (
+                                    <button
+                                      type="button"
+                                      className="mt-1 block rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                      aria-label={`${t.viewOriginalPhoto}: ${row.original.artist ?? ''} - ${row.original.title ?? ''}`}
+                                      onClick={() => setPreviewingRecord(row.original)}
+                                    >
+                                      <img src={value} alt={t.originalPhoto} className="max-h-36 max-w-36 rounded-sm border object-contain" loading="lazy" />
+                                    </button>
+                                  ) : displayDetailValue(value)}
+                                </dd>
                               </div>
                             ))}
                         </dl>
@@ -662,6 +863,36 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           </Button>
         </div>
       </div>
+
+      <Dialog open={previewingRecord !== null} onOpenChange={(open) => !open && setPreviewingRecord(null)}>
+        <DialogContent className="max-h-[90vh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{previewingRecord?.artist} - {previewingRecord?.title}</DialogTitle>
+          </DialogHeader>
+          <div className={`grid gap-4 ${previewingRecord?.image_url && previewingRecord.original_image_url ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
+            {previewingRecord?.image_url && (
+              <figure className="space-y-2">
+                <figcaption className="text-sm font-medium">{t.discogsCover}</figcaption>
+                <img
+                  src={previewingRecord.image_url}
+                  alt={`${t.discogsCover}: ${previewingRecord.artist ?? ''} - ${previewingRecord.title ?? ''}`}
+                  className="mx-auto max-h-[72vh] max-w-full object-contain"
+                />
+              </figure>
+            )}
+            {previewingRecord?.original_image_url && (
+              <figure className="space-y-2">
+                <figcaption className="text-sm font-medium">{t.originalPhoto}</figcaption>
+                <img
+                  src={previewingRecord.original_image_url}
+                  alt={`${t.originalPhoto}: ${previewingRecord.artist ?? ''} - ${previewingRecord.title ?? ''}`}
+                  className="mx-auto max-h-[72vh] max-w-full object-contain"
+                />
+              </figure>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editingRecord !== null} onOpenChange={(open) => !open && setEditingRecord(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[600px]">

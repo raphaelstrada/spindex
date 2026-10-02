@@ -18,7 +18,13 @@ This template provides a minimal setup to get React working in Vite with HMR and
 
 ## Photo Record Identification
 
-Photo identification uses Gemini 3.8 Flash through a Supabase Edge Function. Resized images are sent to Google for identification and are not stored by the app. The API key stays server-side and is never included in the frontend bundle.
+Photo identification uses Gemini 3.8 Flash through a Supabase Edge Function. Resized images are sent to Google for identification. When a record is saved from a photo, its original source image is stored in the public Supabase Storage bucket `vinyl-originals` and linked from the record; multiple records detected in one photo share that image. The bucket limits uploads to 20 MB and supported image formats. The Gemini API key stays server-side and is never included in the frontend bundle.
+
+Apply the database and Storage migration to the linked Supabase project before saving photo imports:
+
+```sh
+npx supabase db push
+```
 
 ### GitHub Actions setup
 
