@@ -16,6 +16,17 @@ Discogs database search and image retrieval require authentication. In your [Dis
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## Local CSV Migration
+
+`migrate.js` reads the Discogs credentials from the Git-ignored `.env.local` file. Add these variables there before running the migration script:
+
+```env
+DISCOGS_CONSUMER_KEY=your_discogs_consumer_key
+DISCOGS_CONSUMER_SECRET=your_discogs_consumer_secret
+```
+
+The script stops with a clear error if either value is missing. Do not commit these credentials. If the previous hard-coded values were pushed to GitHub, revoke/rotate them in Discogs before using the new local values.
+
 ## Photo Record Identification
 
 Photo identification uses Gemini 3.8 Flash through a Supabase Edge Function. Resized images are sent to Google for identification. When a record is saved from a photo, its original source image is stored in the public Supabase Storage bucket `vinyl-originals` and linked from the record; multiple records detected in one photo share that image. The bucket limits uploads to 20 MB and supported image formats. The Gemini API key stays server-side and is never included in the frontend bundle.
@@ -35,6 +46,40 @@ In the repository, open **Settings > Secrets and variables > Actions** and add:
 - Optional repository variable `SUPABASE_PROJECT_REF`: override the project reference. If omitted, the workflow uses this app's Supabase project ref.
 
 The existing `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` build secrets remain unchanged. On a push to `main`, or a manual run from **Actions > Deploy to GitHub Pages > Run workflow**, the workflow copies `GEMINI_API_KEY` into Supabase Edge Function secrets and deploys `identify-records`.
+
+### Facebook Marketplace bridge
+
+Marketplace reading runs locally so Facebook session cookies never leave this computer. There is no Facebook API token: each person signs in manually in a local Chromium window, and the helper saves that person's Playwright session to `~/.vinyl-catalog/fb_auth.json`. The bridge visits only Marketplace item URLs, reads listing text from the main panel, and extracts photos only from the configured main-image XPath.
+
+Clone or download this repository, open a terminal in its folder, and create a local Python environment.
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install playwright
+python -m playwright install chromium
+python marketplace_login.py
+```
+
+The login helper opens Chromium. Sign in to your own Facebook account there, finish any checks, then return to the terminal and press Enter. The session file is stored outside the repository and is never sent to the app.
+
+For Windows PowerShell, use these environment setup commands instead:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install playwright
+python -m playwright install chromium
+python marketplace_login.py
+```
+
+Then start the bridge in the same activated environment:
+
+```sh
+python marketplace_bridge.py
+```
+
+Keep that terminal open. Copy the temporary token it prints into **Upload a Picture > Link to Marketplace**, paste one listing URL per line, and fetch the photos. The helper accepts up to 10 listings and returns at most 5 main-panel photos per listing; it binds only to `127.0.0.1`. Never commit the Facebook session or share the temporary bridge token.
 
 ### Local Edge Function
 

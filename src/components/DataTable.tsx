@@ -52,12 +52,15 @@ import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases } fro
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 
-const visibleRecordFields = new Set(['image_url', 'artist', 'title', 'year_pressed', 'genre', 'discogs_lowest_price'])
+const visibleRecordFields = new Set([
+  'image_url', 'original_image_url', 'artist', 'title', 'year_pressed', 'genre',
+  'discogs_lowest_price', 'marketplace_price', 'marketplace_currency',
+])
 const recordFilterFields: string[] = [
-  'id', 'artist', 'title', 'year_pressed', 'genre', 'image_url', 'source_url',
+  'id', 'artist', 'title', 'year_pressed', 'genre', 'image_url', 'original_image_url', 'source_url',
   'record_label', 'sub_genre', 'record_type', 'record_size', 'country_pressed',
   'media_condition', 'sleeve_condition', 'is_original', 'is_special_edition',
-  'special_edition_reason', 'sell_possibility', 'sold', 'discogs_lowest_price',
+  'special_edition_reason', 'sell_possibility', 'sold', 'discogs_lowest_price', 'marketplace_price', 'marketplace_currency',
   'notes', 'discogs_link',
 ]
 const dropdownFilterFields = new Set([
@@ -82,6 +85,18 @@ function matchesGlobalSearch(record: VinylRecord, query: string, language: Langu
 
 function hasNoDiscogsPrice(record: VinylRecord) {
   return record.discogs_lowest_price === null || record.discogs_lowest_price === undefined
+}
+
+function formatMarketplacePrice(price: number, currency: string | null | undefined, language: Language) {
+  const locale = language === 'pt' ? 'pt-BR' : 'en-US'
+  const number = new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(price)
+  if (!currency) return number
+
+  try {
+    return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(price)
+  } catch {
+    return `${currency} ${number}`
+  }
 }
 
 export function DataTable({ language, recordsVersion }: { language: Language; recordsVersion: number }) {
@@ -488,6 +503,16 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               style: 'currency',
               currency: 'USD',
             }).format(price)
+      },
+    },
+    {
+      accessorKey: 'marketplace_price',
+      header: t.marketplacePrice,
+      cell: ({ row }) => {
+        const price = row.original.marketplace_price
+        return price === null || price === undefined
+          ? '-'
+          : formatMarketplacePrice(price, row.original.marketplace_currency, language)
       },
     },
     {

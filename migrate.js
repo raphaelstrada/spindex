@@ -15,8 +15,8 @@ const supabase = createClient(
   }
 )
 
-const CONSUMER_KEY = 'RCIDQQLSHEVlZPqDlrQE'
-const CONSUMER_SECRET = 'hwPOiafTpwRcgxrjKDdGcxbDTYuVNPan'
+const CONSUMER_KEY = process.env.DISCOGS_CONSUMER_KEY
+const CONSUMER_SECRET = process.env.DISCOGS_CONSUMER_SECRET
 const CSV_FILE = 'marketplace_inventory.csv'
 const TARGET_OWNER = 'Tim' 
 
@@ -53,6 +53,10 @@ async function fetchDiscogsPrice(releaseId) {
 }
 
 async function processInventory() {
+  if (!CONSUMER_KEY || !CONSUMER_SECRET) {
+    throw new Error('Add DISCOGS_CONSUMER_KEY and DISCOGS_CONSUMER_SECRET to .env.local before running the migration.')
+  }
+
   const records = []
   
   await new Promise((resolve) => {

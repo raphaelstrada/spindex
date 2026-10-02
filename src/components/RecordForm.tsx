@@ -44,6 +44,11 @@ function createFormSchema(language: Language) {
     sell_possibility: z.boolean().default(false),
     sold: z.boolean().default(false),
     discogs_lowest_price: z.coerce.number().nonnegative().optional(),
+    marketplace_price: z.preprocess(
+      (value) => value === '' || value === null ? undefined : value,
+      z.coerce.number().nonnegative().optional(),
+    ),
+    marketplace_currency: z.string().max(3).optional(),
     notes: z.string().optional(),
     discogs_link: z.string().optional(),
     image_url: z.string().optional(),
@@ -99,6 +104,8 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
         : initialValues?.sell_possibility ?? true,
       sold: record?.sold ?? false,
       discogs_lowest_price: record?.discogs_lowest_price ?? initialValues?.discogs_lowest_price ?? undefined,
+      marketplace_price: record?.marketplace_price ?? initialValues?.marketplace_price ?? undefined,
+      marketplace_currency: record?.marketplace_currency ?? initialValues?.marketplace_currency ?? '',
       notes: record?.notes ?? initialValues?.notes ?? '',
       discogs_link: record?.discogs_link ?? initialValues?.discogs_link ?? '',
       image_url: record?.image_url ?? initialValues?.image_url ?? '',
@@ -126,6 +133,8 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       record_size: valuesToSave.record_size || null,
       media_condition: valuesToSave.media_condition || null,
       sleeve_condition: valuesToSave.sleeve_condition || null,
+      marketplace_price: valuesToSave.marketplace_price ?? null,
+      marketplace_currency: valuesToSave.marketplace_currency || null,
     }
     const { error } = record
       ? await supabase.from('vinyl_records').update(databaseValues).eq('id', record.id)
@@ -572,6 +581,39 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
           )} />
           <FormField control={form.control} name="source_url" render={({ field }) => (
             <FormItem><FormLabel>{t.facebookMarketplaceLink}</FormLabel><FormControl><Input type="url" placeholder="https://www.facebook.com/marketplace/item/..." {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
+          <FormField control={form.control} name="marketplace_price" render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t.marketplacePrice}</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={field.value === undefined || field.value === null ? '' : String(field.value)}
+                  onChange={(event) => field.onChange(event.target.value)}
+                  placeholder="0.00"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="marketplace_currency" render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t.marketplaceCurrency}</FormLabel>
+              <FormControl>
+                <Input
+                  maxLength={3}
+                  value={field.value ?? ''}
+                  onChange={(event) => field.onChange(event.target.value.toUpperCase().slice(0, 3))}
+                  placeholder="CAD"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
           )} />
         </div>
 
