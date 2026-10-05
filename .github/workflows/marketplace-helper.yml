@@ -18,7 +18,7 @@ jobs:
         include:
           - os: macos-latest
             package: macOS-AppleSilicon
-          - os: macos-13
+          - os: macos-15-intel
             package: macOS-Intel
           - os: windows-latest
             package: Windows
