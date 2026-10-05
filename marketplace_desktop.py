@@ -1,4 +1,5 @@
 import asyncio
+import socket
 import threading
 import tkinter as tk
 import webbrowser
@@ -9,6 +10,12 @@ from marketplace_bridge import AUTH_STATE, LEGACY_AUTH_STATE, BRIDGE_TOKEN, Brid
 from marketplace_login import save_facebook_session
 
 CATALOG_URL = 'https://raphaelstrada.github.io/vinyl-catalog/'
+
+def port_in_use() -> bool:
+    """Return True when something is already listening on the helper port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1)
+        return sock.connect_ex((HOST, PORT)) == 0
 
 
 class MarketplaceHelperApp:
@@ -128,7 +135,13 @@ class MarketplaceHelperApp:
         try:
             self.server = ThreadingHTTPServer((HOST, PORT), BridgeHandler)
         except OSError as error:
-            self.set_status(f'Could not start the local helper: {error}')
+            if port_in_use():
+                self.set_status(
+                    f'A helper is already running at http://{HOST}:{PORT}. Use the helper window that is already open '
+                    '(copy the token there), or close it and any terminal running marketplace_bridge.py, then click Start again.'
+                )
+            else:
+                self.set_status(f'Could not start the local helper: {error}')
             return
 
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
