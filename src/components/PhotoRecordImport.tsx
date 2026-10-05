@@ -648,6 +648,7 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
               >
                 {t.marketplaceHelperRepository}
               </a>
+              <p className="mt-1 text-xs text-muted-foreground">{t.marketplaceMacChipHint}</p>
             </li>
             <li>{t.marketplaceStepLogin}</li>
             <li>{t.marketplaceStepRunBridge}</li>

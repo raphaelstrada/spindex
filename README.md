@@ -51,10 +51,11 @@ The existing `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` build secrets rema
 
 The desktop helper is built for macOS and Windows and published automatically after a successful push to `main`:
 
-- [Download for macOS](https://github.com/raphaelstrada/vinyl-catalog/releases/download/marketplace-helper-latest/MarketplaceHelper-macOS.zip)
+- [Download for macOS (Apple Silicon — M1/M2/M3/M4)](https://github.com/raphaelstrada/vinyl-catalog/releases/download/marketplace-helper-latest/MarketplaceHelper-macOS-AppleSilicon.zip)
+- [Download for macOS (Intel)](https://github.com/raphaelstrada/vinyl-catalog/releases/download/marketplace-helper-latest/MarketplaceHelper-macOS-Intel.zip)
 - [Download for Windows](https://github.com/raphaelstrada/vinyl-catalog/releases/download/marketplace-helper-latest/MarketplaceHelper-Windows.zip)
 
-Download and extract the matching ZIP, then open the app. Google Chrome or Microsoft Edge must be installed. These builds are unsigned, so continue only with a copy downloaded from the official project Releases. On macOS, Control-click the app, choose **Open**, then confirm **Open** again. On Windows SmartScreen, choose **More info > Run anyway**. The helper opens Facebook for a manual sign-in, saves the session only on that computer, starts the local bridge, and provides a copy-token button. No repository clone, Python commands, or Facebook API token are needed for normal use. GitHub access is required if this repository is private.
+Download and extract the matching ZIP for your computer. On a Mac, choose **Apple Silicon** for M1/M2/M3/M4 chips (Apple menu > About This Mac shows "Chip") or **Intel** for older Macs (About This Mac shows "Processor: Intel"). Google Chrome or Microsoft Edge must be installed. These builds are unsigned, so continue only with a copy downloaded from the official project Releases. On macOS, Control-click the app, choose **Open**, then confirm **Open** again. On Windows SmartScreen, choose **More info > Run anyway**. The helper opens Facebook for a manual sign-in, saves the session only on that computer, starts the local bridge, and provides a copy-token button. No repository clone, Python commands, or Facebook API token are needed for normal use. GitHub access is required if this repository is private.
 
 ### Local Marketplace Helper Development
 

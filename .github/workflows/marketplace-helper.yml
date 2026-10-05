@@ -17,7 +17,9 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            package: macOS
+            package: macOS-AppleSilicon
+          - os: macos-13
+            package: macOS-Intel
           - os: windows-latest
             package: Windows
     steps:
