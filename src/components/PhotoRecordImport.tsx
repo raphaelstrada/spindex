@@ -641,7 +641,7 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
             <li>
               {t.marketplaceStepGetFiles}{' '}
               <a
-                href="https://github.com/raphaelstrada/vinyl-catalog/releases/tag/marketplace-helper-latest"
+                href="https://github.com/raphaelstrada/spindex/releases/tag/marketplace-helper-latest"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-medium text-primary underline underline-offset-4"

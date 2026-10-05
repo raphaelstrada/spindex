@@ -23,7 +23,7 @@ const TARGET_OWNER = 'Tim'
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 const authHeaders = { 
-  'User-Agent': 'VinylCatalogApp/1.0',
+  'User-Agent': 'SpindexApp/1.0',
   'Authorization': `Discogs key=${CONSUMER_KEY}, secret=${CONSUMER_SECRET}`
 }
 

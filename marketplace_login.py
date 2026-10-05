@@ -6,7 +6,7 @@ from typing import Callable
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
 
-AUTH_DIRECTORY = Path.home() / '.vinyl-catalog'
+AUTH_DIRECTORY = Path.home() / '.spindex'
 AUTH_STATE = AUTH_DIRECTORY / 'fb_auth.json'
 
 

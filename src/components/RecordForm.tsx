@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { getDiscogsLowestPrice, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
+import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -114,6 +114,22 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   })
 
   async function onSubmit(values: FormValues) {
+    let discogsLowestPrice = values.discogs_lowest_price
+    if (discogsLowestPrice === undefined || discogsLowestPrice === null || Number.isNaN(discogsLowestPrice)) {
+      const releaseId = selectedDiscogsRelease?.id ?? getDiscogsReleaseId(values.discogs_link)
+      if (releaseId) {
+        try {
+          const priceStats = await getDiscogsLowestPrice(releaseId)
+          if (priceStats.lowestPrice !== null) {
+            discogsLowestPrice = priceStats.lowestPrice
+            form.setValue('discogs_lowest_price', discogsLowestPrice, { shouldDirty: true })
+          }
+        } catch {
+          // Saving the record still works when the price lookup fails.
+        }
+      }
+    }
+
     let originalImageUrl: string | undefined
     if (onUploadOriginalImage) {
       try {
@@ -124,9 +140,11 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       }
     }
 
-    const valuesToSave = originalImageUrl
-      ? { ...values, original_image_url: originalImageUrl }
-      : values
+    const valuesToSave = {
+      ...values,
+      discogs_lowest_price: discogsLowestPrice,
+      ...(originalImageUrl ? { original_image_url: originalImageUrl } : {}),
+    }
     const databaseValues = {
       ...valuesToSave,
       record_type: valuesToSave.record_type || null,

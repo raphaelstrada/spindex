@@ -3,7 +3,7 @@ export type Language = 'en' | 'pt'
 export const translations = {
   en: {
     app: {
-      title: 'Vinyl Catalog',
+      title: 'Spindex',
       description: 'Manage your entire record collection.',
       addRecord: 'Add New Record',
       upload: 'Upload',
@@ -232,7 +232,7 @@ export const translations = {
   },
   pt: {
     app: {
-      title: 'Catálogo de Vinis',
+      title: 'Spindex',
       description: 'Organize toda a sua coleção de discos.',
       addRecord: 'Adicionar disco',
       upload: 'Upload',

@@ -15,8 +15,8 @@ PORT = 8765
 MAX_URLS = 10
 MAX_IMAGES_PER_LISTING = 5
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-AUTH_STATE = Path.home() / '.vinyl-catalog' / 'fb_auth.json'
-LEGACY_AUTH_STATE = Path.home() / 'fb_auth.json'
+AUTH_STATE = Path.home() / '.spindex' / 'fb_auth.json'
+LEGACY_AUTH_STATE = Path.home() / '.vinyl-catalog' / 'fb_auth.json'
 ALLOWED_ORIGINS = {
     'http://localhost:5173',
     'http://127.0.0.1:5173',

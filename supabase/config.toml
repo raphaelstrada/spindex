@@ -1,4 +1,4 @@
-project_id = "vinyl-catalog"
+project_id = "spindex"
 
 [functions.discogs-search]
 verify_jwt = true

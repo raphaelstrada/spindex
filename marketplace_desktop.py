@@ -9,7 +9,7 @@ from tkinter import messagebox, ttk
 from marketplace_bridge import AUTH_STATE, LEGACY_AUTH_STATE, BRIDGE_TOKEN, BridgeHandler, HOST, PORT
 from marketplace_login import save_facebook_session
 
-CATALOG_URL = 'https://raphaelstrada.github.io/vinyl-catalog/'
+CATALOG_URL = 'https://raphaelstrada.github.io/spindex/'
 
 def port_in_use() -> bool:
     """Return True when something is already listening on the helper port."""
@@ -21,7 +21,7 @@ def port_in_use() -> bool:
 class MarketplaceHelperApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title('Vinyl Catalog - Marketplace Helper')
+        self.root.title('Spindex - Marketplace Helper')
         self.root.geometry('560x480')
         self.root.minsize(500, 440)
         self.root.protocol('WM_DELETE_WINDOW', self.close)
@@ -39,7 +39,7 @@ class MarketplaceHelperApp:
         ttk.Label(container, text='Marketplace import', font=('', 20, 'bold')).grid(row=0, column=0, sticky='w')
         ttk.Label(
             container,
-            text='Sign in to Facebook locally, then use the Marketplace link importer in Vinyl Catalog.',
+            text='Sign in to Facebook locally, then use the Marketplace link importer in Spindex.',
             wraplength=500,
         ).grid(row=1, column=0, sticky='w', pady=(8, 18))
 
@@ -75,7 +75,7 @@ class MarketplaceHelperApp:
         self.copy_button = ttk.Button(token_row, text='Copy token', command=self.copy_token, state='disabled')
         self.copy_button.grid(row=0, column=1)
 
-        ttk.Button(container, text='Open Vinyl Catalog', command=lambda: webbrowser.open(CATALOG_URL)).grid(
+        ttk.Button(container, text='Open Spindex', command=lambda: webbrowser.open(CATALOG_URL)).grid(
             row=8, column=0, sticky='ew', pady=(10, 4),
         )
         ttk.Label(container, textvariable=self.status, wraplength=500).grid(row=9, column=0, sticky='w', pady=(12, 0))

@@ -37,18 +37,18 @@ jobs:
       - name: Build desktop helper
         run: >-
           python -m PyInstaller --noconfirm --clean --windowed
-          --name VinylCatalogMarketplaceHelper
+          --name SpindexMarketplaceHelper
           --collect-all playwright --collect-all greenlet
           marketplace_desktop.py
 
       - name: Package macOS app
         if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent dist/VinylCatalogMarketplaceHelper.app "dist/MarketplaceHelper-${{ matrix.package }}.zip"
+        run: ditto -c -k --sequesterRsrc --keepParent dist/SpindexMarketplaceHelper.app "dist/MarketplaceHelper-${{ matrix.package }}.zip"
 
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist/VinylCatalogMarketplaceHelper -DestinationPath "dist/MarketplaceHelper-${{ matrix.package }}.zip"
+        run: Compress-Archive -Path dist/SpindexMarketplaceHelper -DestinationPath "dist/MarketplaceHelper-${{ matrix.package }}.zip"
 
       - name: Upload downloadable package
         uses: actions/upload-artifact@v4

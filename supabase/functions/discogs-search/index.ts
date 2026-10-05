@@ -89,7 +89,7 @@ Deno.serve(async (request) => {
 
     const discogsHeaders = {
       Accept: 'application/vnd.discogs.v2.discogs+json',
-      'User-Agent': 'VinylCatalog/1.0',
+      'User-Agent': 'Spindex/1.0',
       Authorization: token
         ? `Discogs token=${token}`
         : `Discogs key=${consumerKey}, secret=${consumerSecret}`,

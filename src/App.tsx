@@ -13,27 +13,30 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { translations, type Language } from '@/lib/i18n'
+import { Logo } from '@/components/Logo'
 
 export default function App() {
   const [isOpen, setIsOpen] = useState(false)
   const [isPhotoImportOpen, setIsPhotoImportOpen] = useState(false)
   const [recordsVersion, setRecordsVersion] = useState(0)
   const [language, setLanguage] = useState<Language>(() =>
-    window.localStorage.getItem('vinyl-catalog-language') === 'pt' ? 'pt' : 'en',
+    window.localStorage.getItem('spindex-language') === 'pt' ? 'pt' : 'en',
   )
   const t = translations[language]
 
   useEffect(() => {
     document.documentElement.lang = language
     document.title = t.app.title
-    window.localStorage.setItem('vinyl-catalog-language', language)
+    window.localStorage.setItem('spindex-language', language)
   }, [language, t.app.title])
 
   return (
     <div className="container mx-auto max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 sm:py-8 2xl:px-8">
       <header className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">{t.app.title}</h1>
+          <h1>
+            <Logo />
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">{t.app.description}</p>
         </div>
         <div className="flex items-center justify-between gap-3 sm:justify-end">
