@@ -43,12 +43,12 @@ jobs:
 
       - name: Package macOS app
         if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent dist/VinylCatalogMarketplaceHelper.app dist/MarketplaceHelper-macOS.zip
+        run: ditto -c -k --sequesterRsrc --keepParent dist/VinylCatalogMarketplaceHelper.app "dist/MarketplaceHelper-${{ matrix.package }}.zip"
 
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist/VinylCatalogMarketplaceHelper -DestinationPath dist/MarketplaceHelper-Windows.zip
+        run: Compress-Archive -Path dist/VinylCatalogMarketplaceHelper -DestinationPath "dist/MarketplaceHelper-${{ matrix.package }}.zip"
 
       - name: Upload downloadable package
         uses: actions/upload-artifact@v4
