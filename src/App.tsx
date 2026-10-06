@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Images } from 'lucide-react'
+import { Images, Moon, Sun } from 'lucide-react'
 import { RecordForm } from '@/components/RecordForm'
 import { PhotoRecordImport } from '@/components/PhotoRecordImport'
 import { DataTable } from '@/components/DataTable'
@@ -22,7 +22,15 @@ export default function App() {
   const [language, setLanguage] = useState<Language>(() =>
     window.localStorage.getItem('spindex-language') === 'pt' ? 'pt' : 'en',
   )
+  const [theme, setTheme] = useState<'dark' | 'light'>(() =>
+    window.localStorage.getItem('spindex-theme') === 'light' ? 'light' : 'dark',
+  )
   const t = translations[language]
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+    window.localStorage.setItem('spindex-theme', theme)
+  }, [theme])
 
   useEffect(() => {
     document.documentElement.lang = language
@@ -40,6 +48,15 @@ export default function App() {
           <p className="mt-1 text-sm text-muted-foreground">{t.app.description}</p>
         </div>
         <div className="flex items-center justify-between gap-3 sm:justify-end">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={theme === 'dark' ? t.app.switchToLightMode : t.app.switchToDarkMode}
+            title={theme === 'dark' ? t.app.switchToLightMode : t.app.switchToDarkMode}
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          >
+            {theme === 'dark' ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

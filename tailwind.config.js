@@ -10,6 +10,7 @@ export default {
       fontFamily: {
         sans: ["Helvetica Neue", "Helvetica", "Arial", "sans-serif"],
         "space-grotesk": ["Space Grotesk", "Helvetica Neue", "sans-serif"],
+        "special-elite": ["Special Elite", "Courier New", "monospace"],
       },
       colors: {
         border: "hsl(var(--border))",
