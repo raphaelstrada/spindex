@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { getCollectionOwner } from '@/lib/collection'
 import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import { Button } from '@/components/ui/button'
 import {
@@ -156,7 +157,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     }
     const { error } = record
       ? await supabase.from('vinyl_records').update(databaseValues).eq('id', record.id)
-      : await supabase.from('vinyl_records').insert([{ ...databaseValues, collection_owner: 'Raphael' }])
+      : await supabase.from('vinyl_records').insert([{ ...databaseValues, collection_owner: getCollectionOwner() }])
     
     if (error) {
       console.error('Failed to insert record:', error.message)

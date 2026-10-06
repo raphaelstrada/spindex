@@ -48,6 +48,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
+import { getCollectionOwner } from '@/lib/collection'
 import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
@@ -146,7 +147,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       const { data: records, error } = await supabase
         .from('vinyl_records')
         .select('*')
-        .eq('collection_owner', 'Raphael')
+        .ilike('collection_owner', getCollectionOwner())
         .order('artist', { ascending: true })
 
       if (error) {
