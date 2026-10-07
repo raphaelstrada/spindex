@@ -111,6 +111,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 100 })
   const [previewingRecord, setPreviewingRecord] = useState<VinylRecord | null>(null)
   const [editingRecord, setEditingRecord] = useState<VinylRecord | null>(null)
+  const [editAutoSearch, setEditAutoSearch] = useState(false)
   const [deletingRecord, setDeletingRecord] = useState<VinylRecord | null>(null)
   const [pendingActionId, setPendingActionId] = useState<string | null>(null)
   const [pendingPriceId, setPendingPriceId] = useState<string | null>(null)
@@ -310,14 +311,18 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     setPendingPriceId(record.id)
     try {
       const result = await updateDiscogsPrice(record)
-      if (result === 'no-release') alert(t.noExactDiscogsRelease)
-      if (result === 'no-price') alert(t.noDiscogsPrice)
       if (result === 'updated') {
         setSelectedPriceIds((current) => {
           const next = new Set(current)
           next.delete(record.id)
           return next
         })
+        return
+      }
+      // Auto-fill failed: open the edit dialog with Discogs suggestions to pick the right release.
+      if (result === 'no-release' || result === 'no-price') {
+        setEditAutoSearch(true)
+        setEditingRecord(record)
       }
     } catch (error) {
       alert(`${t.updateFailed} ${error instanceof Error ? error.message : ''}`)
@@ -857,7 +862,10 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               aria-label={t.edit}
               title={t.edit}
               disabled={isPending}
-              onClick={() => setEditingRecord(record)}
+              onClick={() => {
+                setEditAutoSearch(false)
+                setEditingRecord(record)
+              }}
             >
               <Pencil aria-hidden="true" />
             </Button>
@@ -1163,9 +1171,15 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows.length ? (
-              table.getRowModel().rows.map((row) => (
+              table.getRowModel().rows.map((row) => {
+                const missingDiscogsLink = !getDiscogsReleaseId(row.original.discogs_link)
+                const rowClass = [
+                  row.original.sold ? 'opacity-50' : '',
+                  missingDiscogsLink ? 'bg-amber-500/10' : '',
+                ].filter(Boolean).join(' ') || undefined
+                return (
                 <Fragment key={row.id}>
-                  <TableRow key={row.id} className={row.original.sold ? 'opacity-50' : undefined}>
+                  <TableRow key={row.id} className={rowClass}>
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id} className="px-3 py-2.5 align-middle">
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -1203,7 +1217,8 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
                     </TableRow>
                   )}
                 </Fragment>
-              ))
+                )
+              })
             ) : (
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
@@ -1281,6 +1296,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               key={editingRecord.id}
               language={language}
               record={editingRecord}
+              autoSearchDiscogs={editAutoSearch}
               onSuccess={(values) => {
                 setData((current) => current.map((item) =>
                   item.id === editingRecord.id ? { ...item, ...values } : item,
