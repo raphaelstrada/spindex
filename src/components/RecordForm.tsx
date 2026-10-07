@@ -60,16 +60,17 @@ function createFormSchema(language: Language) {
 type FormInput = z.input<ReturnType<typeof createFormSchema>>
 type FormValues = z.output<ReturnType<typeof createFormSchema>>
 
-export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, onUploadPicture, onUploadOriginalImage, onSuccess, onSaveAndNext }: {
+export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, startWithDiscogsUrl = false, onUploadPicture, onUploadOriginalImage, onSuccess, onSaveAndNext }: {
   language: Language
   record?: VinylRecord
   initialValues?: Partial<VinylRecord>
   showTopSaveButton?: boolean
   autoSearchDiscogs?: boolean
+  startWithDiscogsUrl?: boolean
   onUploadPicture?: () => void
   onUploadOriginalImage?: () => Promise<string>
   onSuccess?: (values: FormValues) => void
-  onSaveAndNext?: (values: FormValues) => void
+  onSaveAndNext?: (values: FormValues, addToCollection: boolean) => void
 }) {
   const t = translations[language].form
   const [discogsSearching, setDiscogsSearching] = useState(false)
@@ -80,11 +81,12 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const [discogsYearFilter, setDiscogsYearFilter] = useState('all')
   const [discogsPriceLoading, setDiscogsPriceLoading] = useState(false)
   const [discogsPriceLookupComplete, setDiscogsPriceLookupComplete] = useState(false)
-  const [showDiscogsUrl, setShowDiscogsUrl] = useState(false)
+  const [showDiscogsUrl, setShowDiscogsUrl] = useState(startWithDiscogsUrl)
   const [discogsUrlInput, setDiscogsUrlInput] = useState('')
   const [selectedDiscogsTitle, setSelectedDiscogsTitle] = useState<string | null>(null)
   const [selectedDiscogsRelease, setSelectedDiscogsRelease] = useState<DiscogsRelease | null>(null)
   const [appliedDiscogsFields, setAppliedDiscogsFields] = useState<Set<string>>(new Set())
+  const [addToDiscogsCollection, setAddToDiscogsCollection] = useState(true)
   const form = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(createFormSchema(language)),
     defaultValues: {
@@ -93,18 +95,16 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       record_label: record?.record_label ?? initialValues?.record_label ?? '',
       genre: record?.genre ?? initialValues?.genre ?? '',
       sub_genre: record?.sub_genre ?? initialValues?.sub_genre ?? '',
-      record_type: record?.record_type ?? initialValues?.record_type ?? 'LP',
-      record_size: record?.record_size ?? initialValues?.record_size ?? '12"',
+      record_type: record?.record_type ?? initialValues?.record_type ?? '',
+      record_size: record?.record_size ?? initialValues?.record_size ?? '',
       year_pressed: record?.year_pressed ?? initialValues?.year_pressed ?? undefined,
       country_pressed: record?.country_pressed ?? initialValues?.country_pressed ?? '',
-      media_condition: record?.media_condition ?? initialValues?.media_condition ?? 'VG+',
-      sleeve_condition: record?.sleeve_condition ?? initialValues?.sleeve_condition ?? 'VG+',
+      media_condition: record?.media_condition ?? initialValues?.media_condition ?? '',
+      sleeve_condition: record?.sleeve_condition ?? initialValues?.sleeve_condition ?? '',
       is_original: record?.is_original ?? initialValues?.is_original ?? true,
       is_special_edition: record?.is_special_edition ?? false,
       special_edition_reason: record?.special_edition_reason ?? '',
-      sell_possibility: record
-        ? record.sell_possibility ?? false
-        : initialValues?.sell_possibility ?? true,
+      sell_possibility: record?.sell_possibility ?? initialValues?.sell_possibility ?? false,
       sold: record?.sold ?? false,
       discogs_lowest_price: record?.discogs_lowest_price ?? initialValues?.discogs_lowest_price ?? undefined,
       marketplace_price: record?.marketplace_price ?? initialValues?.marketplace_price ?? undefined,
@@ -117,19 +117,19 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   })
 
   async function onSubmit(values: FormValues) {
+    // Whenever the record is associated with a Discogs release (via picker or URL),
+    // refresh the lowest price so it always reflects the associated release.
     let discogsLowestPrice = values.discogs_lowest_price
-    if (discogsLowestPrice === undefined || discogsLowestPrice === null || Number.isNaN(discogsLowestPrice)) {
-      const releaseId = selectedDiscogsRelease?.id ?? getDiscogsReleaseId(values.discogs_link)
-      if (releaseId) {
-        try {
-          const priceStats = await getDiscogsLowestPrice(releaseId)
-          if (priceStats.lowestPrice !== null) {
-            discogsLowestPrice = priceStats.lowestPrice
-            form.setValue('discogs_lowest_price', discogsLowestPrice, { shouldDirty: true })
-          }
-        } catch {
-          // Saving the record still works when the price lookup fails.
+    const associatedReleaseId = selectedDiscogsRelease?.id ?? getDiscogsReleaseId(values.discogs_link)
+    if (associatedReleaseId) {
+      try {
+        const priceStats = await getDiscogsLowestPrice(associatedReleaseId)
+        if (priceStats.lowestPrice !== null) {
+          discogsLowestPrice = priceStats.lowestPrice
+          form.setValue('discogs_lowest_price', discogsLowestPrice, { shouldDirty: true })
         }
+      } catch {
+        // Saving the record still works when the price lookup fails.
       }
     }
 
@@ -168,7 +168,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     }
 
     if (onSaveAndNext) {
-      onSaveAndNext(valuesToSave)
+      onSaveAndNext(valuesToSave, addToDiscogsCollection)
       return
     }
 
@@ -355,10 +355,19 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const discogsCountries = [...new Set(discogsResults.map((release) => release.country).filter((country): country is string => Boolean(country)))].sort()
   const discogsYears = [...new Set(discogsResults.map((release) => release.year).filter((year): year is number => year !== null))]
     .sort((left, right) => right - left)
-  const filteredDiscogsResults = discogsResults.filter((release) =>
-    (discogsCountryFilter === 'all' || release.country === discogsCountryFilter)
-    && (discogsYearFilter === 'all' || String(release.year) === discogsYearFilter),
-  )
+  // Prefer releases pressed in Canada, then Brazil, then the US.
+  const countryPreference = (country: string | null) => {
+    if (country === 'Canada') return 0
+    if (country === 'Brazil') return 1
+    if (country === 'US' || country === 'USA' || country === 'United States') return 2
+    return 3
+  }
+  const filteredDiscogsResults = discogsResults
+    .filter((release) =>
+      (discogsCountryFilter === 'all' || release.country === discogsCountryFilter)
+      && (discogsYearFilter === 'all' || String(release.year) === discogsYearFilter),
+    )
+    .sort((left, right) => countryPreference(left.country) - countryPreference(right.country))
   const hasDiscogsFilters = discogsCountryFilter !== 'all' || discogsYearFilter !== 'all'
 
   return (
@@ -686,6 +695,17 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
             <FormItem><FormLabel>{t.notes}</FormLabel><FormControl><Textarea placeholder={t.notesPlaceholder} className="resize-none" {...field} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
+
+        {onSaveAndNext && (
+          <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm font-medium text-destructive">
+            <Checkbox
+              checked={addToDiscogsCollection}
+              onCheckedChange={(checked) => setAddToDiscogsCollection(checked === true)}
+              className="border-destructive data-[state=checked]:bg-destructive data-[state=checked]:text-destructive-foreground"
+            />
+            {t.addToDiscogsCollection}
+          </label>
+        )}
 
         <Button type="submit" className="mt-4 w-full" disabled={form.formState.isSubmitting}>
           {record ? (onSaveAndNext ? t.saveAndNext : t.saveChanges) : t.save}

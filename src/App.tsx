@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Images, Moon, Sun } from 'lucide-react'
+import { Disc3, Images, Moon, PenLine, Sun } from 'lucide-react'
 import { RecordForm } from '@/components/RecordForm'
 import { PhotoRecordImport } from '@/components/PhotoRecordImport'
 import { DataTable } from '@/components/DataTable'
@@ -15,9 +15,12 @@ import {
 import { translations, type Language } from '@/lib/i18n'
 import { Logo } from '@/components/Logo'
 
+type AddRecordPath = 'picture' | 'discogsUrl' | 'manual' | null
+
 export default function App() {
   const [isOpen, setIsOpen] = useState(false)
   const [isPhotoImportOpen, setIsPhotoImportOpen] = useState(false)
+  const [addRecordPath, setAddRecordPath] = useState<AddRecordPath>(null)
   const [recordsVersion, setRecordsVersion] = useState(0)
   const [language, setLanguage] = useState<Language>(() =>
     window.localStorage.getItem('spindex-language') === 'pt' ? 'pt' : 'en',
@@ -84,34 +87,72 @@ export default function App() {
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Dialog open={isOpen} onOpenChange={setIsOpen}>
+          <Dialog open={isOpen} onOpenChange={(open) => {
+            setIsOpen(open)
+            if (!open) setAddRecordPath(null)
+          }}>
             <DialogTrigger asChild>
-              <Button variant="outline">{t.app.addRecord}</Button>
+              <Button>{t.app.addRecord}</Button>
             </DialogTrigger>
             <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[600px]">
               <DialogHeader>
-                <DialogTitle>{t.app.dialogTitle}</DialogTitle>
+                <DialogTitle>
+                  {addRecordPath === null ? t.app.addRecordPathTitle : t.app.dialogTitle}
+                </DialogTitle>
               </DialogHeader>
-              <RecordForm
-                language={language}
-                onUploadPicture={() => {
-                  setIsOpen(false)
-                  setIsPhotoImportOpen(true)
-                }}
-                onSuccess={() => {
-                  setIsOpen(false)
-                  setRecordsVersion((version) => version + 1)
-                }}
-              />
+              {addRecordPath === null ? (
+                <div className="grid gap-3 py-2">
+                  <button
+                    type="button"
+                    className="flex items-center gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => {
+                      setIsOpen(false)
+                      setIsPhotoImportOpen(true)
+                    }}
+                  >
+                    <Images aria-hidden="true" className="h-6 w-6 shrink-0 text-muted-foreground" />
+                    <span>
+                      <span className="block font-medium">{t.app.addRecordPathPicture}</span>
+                      <span className="mt-0.5 block text-sm text-muted-foreground">{t.app.addRecordPathPictureHint}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex items-center gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setAddRecordPath('discogsUrl')}
+                  >
+                    <Disc3 aria-hidden="true" className="h-6 w-6 shrink-0 text-muted-foreground" />
+                    <span>
+                      <span className="block font-medium">{t.app.addRecordPathDiscogsUrl}</span>
+                      <span className="mt-0.5 block text-sm text-muted-foreground">{t.app.addRecordPathDiscogsUrlHint}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex items-center gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setAddRecordPath('manual')}
+                  >
+                    <PenLine aria-hidden="true" className="h-6 w-6 shrink-0 text-muted-foreground" />
+                    <span>
+                      <span className="block font-medium">{t.app.addRecordPathManual}</span>
+                      <span className="mt-0.5 block text-sm text-muted-foreground">{t.app.addRecordPathManualHint}</span>
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                <RecordForm
+                  language={language}
+                  startWithDiscogsUrl={addRecordPath === 'discogsUrl'}
+                  onSuccess={() => {
+                    setIsOpen(false)
+                    setAddRecordPath(null)
+                    setRecordsVersion((version) => version + 1)
+                  }}
+                />
+              )}
             </DialogContent>
           </Dialog>
           <Dialog open={isPhotoImportOpen} onOpenChange={setIsPhotoImportOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Images aria-hidden="true" />
-                {t.app.uploadPicture}
-              </Button>
-            </DialogTrigger>
             <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
               <DialogHeader>
                 <DialogTitle>{t.app.uploadPicture}</DialogTitle>

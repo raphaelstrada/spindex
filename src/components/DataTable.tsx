@@ -83,11 +83,14 @@ function searchableValue(value: unknown, language: Language) {
   return String(value)
 }
 
-function matchesGlobalSearch(record: VinylRecord, query: string, language: Language) {
-  return Object.entries(record).some(([field, value]) =>
-    field !== 'collection_owner'
-    && searchableValue(value, language).toLocaleLowerCase().includes(query),
-  )
+const globalSearchFields = ['artist', 'title', 'record_label', 'genre', 'sub_genre', 'country_pressed', 'year_pressed'] as const
+
+function matchesGlobalSearch(record: VinylRecord, query: string) {
+  return globalSearchFields.some((field) => {
+    const value = record[field]
+    if (value === null || value === undefined) return false
+    return String(value).toLocaleLowerCase().includes(query)
+  })
 }
 
 function hasNoDiscogsPrice(record: VinylRecord) {
@@ -113,6 +116,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const [sorting, setSorting] = useState<SortingState>([{ id: 'artist', desc: false }])
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const [globalSearch, setGlobalSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [advancedFilters, setAdvancedFilters] = useState<Record<string, string>>({})
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 100 })
   const [previewingRecord, setPreviewingRecord] = useState<VinylRecord | null>(null)
@@ -213,7 +217,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         for (;;) {
           const { data: records, error } = await supabase
             .from('vinyl_records')
-            .select('*')
+            .select('id, collection_owner, artist, title, year_pressed, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, price_on_discogs, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url')
             .ilike('collection_owner', getCollectionOwner())
             .order('artist', { ascending: true })
             .order('id', { ascending: true })
@@ -354,9 +358,15 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     return String(value)
   }
 
-  const normalizedSearch = globalSearch.trim().toLocaleLowerCase()
+  // Debounce the global search so filtering doesn't run on every keystroke.
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearch(globalSearch), 250)
+    return () => window.clearTimeout(timeout)
+  }, [globalSearch])
+
+  const normalizedSearch = debouncedSearch.trim().toLocaleLowerCase()
   const filteredData = useMemo(() => data.filter((record) => {
-    if (normalizedSearch && !matchesGlobalSearch(record, normalizedSearch, language)) return false
+    if (normalizedSearch && !matchesGlobalSearch(record, normalizedSearch)) return false
 
     return Object.entries(advancedFilters).every(([field, query]) => {
       if (!query) return true
@@ -375,7 +385,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
 
     for (const field of dropdownFilterFields) {
       const matchingRecords = data.filter((record) => {
-        if (normalizedSearch && !matchesGlobalSearch(record, normalizedSearch, language)) return false
+        if (normalizedSearch && !matchesGlobalSearch(record, normalizedSearch)) return false
 
         const matchesTextFilters = Object.entries(advancedFilters).every(([filterField, query]) => {
           if (!query || dropdownFilterFields.has(filterField)) return true
@@ -473,12 +483,19 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     setBatchSyncIndex(0)
   }
 
-  function handleBatchSave(savedValues: Partial<VinylRecord>) {
+  function handleBatchSave(savedValues: Partial<VinylRecord>, addToCollection: boolean) {
     if (!batchSyncRecords) return
     const currentRecord = batchSyncRecords[batchSyncIndex]
+    const updatedRecord = { ...currentRecord, ...savedValues }
     setData((current) => current.map((item) =>
-      item.id === currentRecord.id ? { ...item, ...savedValues } : item,
+      item.id === currentRecord.id ? updatedRecord : item,
     ))
+
+    // If the checkbox was marked, sync this record to the Discogs collection right away.
+    if (addToCollection && getDiscogsReleaseId(updatedRecord.discogs_link) !== null) {
+      void runDiscogsSync('add', [updatedRecord])
+    }
+
     if (batchSyncIndex + 1 < batchSyncRecords.length) {
       setBatchSyncIndex((index) => index + 1)
     } else {
@@ -723,7 +740,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
             title={t.viewCover}
             onClick={() => setPreviewingRecord(row.original)}
           >
-            <img src={url} alt={t.cover} className="h-12 w-12 rounded-sm object-cover shadow-sm" />
+            <img src={url} alt={t.cover} className="h-12 w-12 rounded-sm object-cover shadow-sm" loading="lazy" decoding="async" />
           </button>
         ) : (
           <div className="flex h-12 w-12 items-center justify-center rounded-sm bg-muted text-center text-[10px] leading-tight text-muted-foreground">{t.noImage}</div>
@@ -1468,7 +1485,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               language={language}
               record={batchSyncRecords[batchSyncIndex]}
               autoSearchDiscogs
-              onSaveAndNext={(values) => handleBatchSave(values)}
+              onSaveAndNext={(values, addToCollection) => handleBatchSave(values, addToCollection)}
             />
           )}
         </DialogContent>
