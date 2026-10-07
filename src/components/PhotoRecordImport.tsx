@@ -322,6 +322,16 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
 
   async function identifyRecords() {
     if (photos.length === 0) return
+
+    // This action spends paid Gemini tokens, so it requires a PIN.
+    const PAID_ACTION_PIN = '1212'
+    const pin = window.prompt(t.paidActionPinPrompt)?.trim() ?? ''
+    if (!pin) return
+    if (pin !== PAID_ACTION_PIN) {
+      const retry = window.prompt(t.paidActionPinInvalid)?.trim() ?? ''
+      if (retry !== PAID_ACTION_PIN) return
+    }
+
     setError(null)
     setIsIdentifying(true)
     setProgress(t.preparingPhotos)
