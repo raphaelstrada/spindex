@@ -1,5 +1,3 @@
-import { createClient } from 'npm:@supabase/supabase-js@2'
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -26,6 +24,31 @@ function jsonResponse(body: unknown, status = 200) {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function markRecordsSynced(ids: string[]) {
+  // Uses the PostgREST API directly so this function has zero external dependencies.
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!supabaseUrl || !serviceRoleKey || ids.length === 0) return
+
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/vinyl_records?id=in.(${ids.join(',')})`,
+    {
+      method: 'PATCH',
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({ discogs_synced_at: new Date().toISOString() }),
+    },
+  )
+
+  if (!response.ok) {
+    console.error('Failed to mark records as synced:', response.status, await response.text())
+  }
 }
 
 Deno.serve(async (request) => {
@@ -120,23 +143,11 @@ Deno.serve(async (request) => {
       }
     }
 
-    // Mark successfully synced records in the database (uses service role: trusted server-side).
+    // Mark successfully synced records in the database.
     const syncedIds = results
       .filter((result) => result.status === 'added' || result.status === 'already_in_collection')
       .map((result) => result.id)
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-    if (syncedIds.length > 0 && supabaseUrl && serviceRoleKey) {
-      const supabase = createClient(supabaseUrl, serviceRoleKey)
-      const { error } = await supabase
-        .from('vinyl_records')
-        .update({ discogs_synced_at: new Date().toISOString() })
-        .in('id', syncedIds)
-      if (error) {
-        console.error('Failed to mark records as synced:', error.message)
-      }
-    }
+    await markRecordsSynced(syncedIds)
 
     const summary = {
       added: results.filter((result) => result.status === 'added').length,
