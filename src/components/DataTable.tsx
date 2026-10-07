@@ -27,6 +27,12 @@ import {
 import { RecordForm } from '@/components/RecordForm'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -163,6 +169,10 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         removeSummary: translations.pt.table.removeSummary,
         syncingProgress: translations.pt.table.syncingProgress,
         syncResultsTitle: translations.pt.table.syncResultsTitle,
+        visitDiscogsLink: translations.pt.table.visitDiscogsLink,
+        removeFromMyDiscogsList: translations.pt.table.removeFromMyDiscogsList,
+        selectSyncedOnly: translations.pt.table.selectSyncedOnly,
+        selectNotSynced: translations.pt.table.selectNotSynced,
       }
     : {
         selectAllForSync: translations.en.table.selectAllForSync,
@@ -181,6 +191,10 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         removeSummary: translations.en.table.removeSummary,
         syncingProgress: translations.en.table.syncingProgress,
         syncResultsTitle: translations.en.table.syncResultsTitle,
+        visitDiscogsLink: translations.en.table.visitDiscogsLink,
+        removeFromMyDiscogsList: translations.en.table.removeFromMyDiscogsList,
+        selectSyncedOnly: translations.en.table.selectSyncedOnly,
+        selectNotSynced: translations.en.table.selectNotSynced,
       }
 
   useEffect(() => {
@@ -431,10 +445,28 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     })
   }
 
-  async function runDiscogsSync(action: 'add' | 'remove') {
+  // Select only synced or only not-synced records within the current filter.
+  function selectSyncedOnly(synced: boolean) {
+    setSelectedSyncIds((current) => {
+      const next = new Set(current)
+      for (const record of filteredData) {
+        const isSynced = Boolean(record.discogs_synced_at)
+        if (isSynced === synced) next.add(record.id)
+        else next.delete(record.id)
+      }
+      return next
+    })
+  }
+
+  // Remove a single record from the Discogs collection (from the synced row menu).
+  function removeSingleRecord(record: VinylRecord) {
+    void runDiscogsSync('remove', [record])
+  }
+
+  async function runDiscogsSync(action: 'add' | 'remove', explicitRecords?: VinylRecord[]) {
     if (isSyncLoading) return
 
-    const selectedRecords = data.filter((record) => selectedSyncIds.has(record.id))
+    const selectedRecords = explicitRecords ?? data.filter((record) => selectedSyncIds.has(record.id))
     const syncableRecords = selectedRecords
       .map((record) => ({ record, releaseId: getDiscogsReleaseId(record.discogs_link) }))
       .filter((entry): entry is { record: VinylRecord; releaseId: number } => entry.releaseId !== null)
@@ -765,40 +797,104 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     {
       id: 'discogsSync',
       header: () => (
-        <Button
-          variant="ghost"
-          size="icon"
-          className={`h-8 w-8 ${selectedFilteredSyncCount > 0 && selectedFilteredSyncCount === filteredData.length ? 'text-brand-green' : 'text-muted-foreground'}`}
-          aria-label={syncUiText.selectAllForSync}
-          title={syncUiText.selectAllForSync}
-          disabled={filteredData.length === 0}
-          onClick={() => toggleAllForSync(selectedFilteredSyncCount !== filteredData.length)}
-        >
-          <Disc3
-            aria-hidden="true"
-            fill={selectedFilteredSyncCount > 0 ? 'currentColor' : 'none'}
-            fillOpacity={selectedFilteredSyncCount > 0 ? (selectedFilteredSyncCount === filteredData.length ? 0.25 : 0.1) : 0}
-          />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-8 w-8 ${selectedFilteredSyncCount > 0 && selectedFilteredSyncCount === filteredData.length ? 'text-brand-green' : 'text-muted-foreground'}`}
+              aria-label={syncUiText.selectAllForSync}
+              title={syncUiText.selectAllForSync}
+              disabled={filteredData.length === 0}
+            >
+              <Disc3
+                aria-hidden="true"
+                fill={selectedFilteredSyncCount > 0 ? 'currentColor' : 'none'}
+                fillOpacity={selectedFilteredSyncCount > 0 ? (selectedFilteredSyncCount === filteredData.length ? 0.25 : 0.1) : 0}
+              />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center">
+            <DropdownMenuItem onClick={() => toggleAllForSync(true)}>
+              {syncUiText.selectAllForSync}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => selectSyncedOnly(true)}>
+              {syncUiText.selectSyncedOnly}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => selectSyncedOnly(false)}>
+              {syncUiText.selectNotSynced}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       ),
       enableSorting: false,
       size: 44,
       cell: ({ row }) => {
         const record = row.original
         const isSynced = Boolean(record.discogs_synced_at)
+        const hasLink = getDiscogsReleaseId(record.discogs_link) !== null
         const isSelected = selectedSyncIds.has(record.id)
-        const isHighlighted = isSynced || isSelected
-        const label = isSynced
-          ? t.discogsSynced
-          : `${syncUiText.selectRecordForSync}: ${record.artist ?? ''} - ${record.title ?? ''}`
+        const releaseUrl = record.discogs_link?.trim() || null
+
+        // Synced: green icon, opens a menu to visit the link or remove from the Discogs list.
+        if (isSynced) {
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-brand-green"
+                  aria-label={t.discogsSynced}
+                  title={t.discogsSynced}
+                >
+                  <Disc3 aria-hidden="true" fill="currentColor" fillOpacity={0.25} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="center">
+                {releaseUrl && (
+                  <DropdownMenuItem asChild>
+                    <a href={releaseUrl} target="_blank" rel="noopener noreferrer">
+                      {syncUiText.visitDiscogsLink}
+                    </a>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={() => void removeSingleRecord(record)}>
+                  {syncUiText.removeFromMyDiscogsList}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        }
+
+        // Not synced, no usable link: clicking opens the edit dialog with Discogs suggestions.
+        if (!hasLink) {
+          return (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              aria-label={t.noDiscogsLinkRow}
+              title={t.noDiscogsLinkRow}
+              onClick={() => {
+                setEditAutoSearch(true)
+                setEditingRecord(record)
+              }}
+            >
+              <Disc3 aria-hidden="true" />
+            </Button>
+          )
+        }
+
+        // Not synced but has a usable link: clicking toggles the sync selection.
         return (
           <Button
             variant="ghost"
             size="icon"
-            className={`h-8 w-8 ${isSynced ? 'text-brand-green' : isSelected ? 'text-brand-blue' : 'text-muted-foreground'}`}
-            aria-label={label}
+            className={`h-8 w-8 ${isSelected ? 'text-brand-blue' : 'text-muted-foreground'}`}
+            aria-label={`${syncUiText.selectRecordForSync}: ${record.artist ?? ''} - ${record.title ?? ''}`}
             aria-pressed={isSelected}
-            title={label}
+            title={`${syncUiText.selectRecordForSync}: ${record.artist ?? ''} - ${record.title ?? ''}`}
             onClick={() => {
               setSelectedSyncIds((current) => {
                 const next = new Set(current)
@@ -808,7 +904,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               })
             }}
           >
-            <Disc3 aria-hidden="true" fill={isHighlighted ? 'currentColor' : 'none'} fillOpacity={isHighlighted ? 0.25 : 0} />
+            <Disc3 aria-hidden="true" fill={isSelected ? 'currentColor' : 'none'} fillOpacity={isSelected ? 0.25 : 0} />
           </Button>
         )
       },
