@@ -49,7 +49,7 @@ import {
 } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
 import { getCollectionOwner } from '@/lib/collection'
-import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases } from '@/lib/discogs'
+import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, syncRecordsToDiscogs } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 
@@ -115,6 +115,9 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const [pendingActionId, setPendingActionId] = useState<string | null>(null)
   const [pendingPriceId, setPendingPriceId] = useState<string | null>(null)
   const [selectedPriceIds, setSelectedPriceIds] = useState<Set<string>>(new Set())
+  const [selectedSyncIds, setSelectedSyncIds] = useState<Set<string>>(new Set())
+  const [isSyncLoading, setIsSyncLoading] = useState(false)
+  const [syncSummary, setSyncSummary] = useState<string | null>(null)
   const [isBatchPriceLoading, setIsBatchPriceLoading] = useState(false)
   const [batchPriceProgress, setBatchPriceProgress] = useState<{ current: number; total: number } | null>(null)
   const [batchPriceSummary, setBatchPriceSummary] = useState<string | null>(null)
@@ -138,6 +141,31 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         autoFillSelectedPrices: translations.en.table.autoFillSelectedPrices,
         clearPriceSelection: translations.en.table.clearPriceSelection,
         batchPriceSummary: translations.en.table.batchPriceSummary,
+      }
+  const syncUiText = language === 'pt'
+    ? {
+        selectAllForSync: translations.pt.table.selectAllForSync,
+        selectRecordForSync: translations.pt.table.selectRecordForSync,
+        recordsSelectedForSync: translations.pt.table.recordsSelectedForSync,
+        discogsSyncSelected: translations.pt.table.discogsSyncSelected,
+        clearSyncSelection: translations.pt.table.clearSyncSelection,
+        syncingWithDiscogs: translations.pt.table.syncingWithDiscogs,
+        discogsTokenPrompt: translations.pt.table.discogsTokenPrompt,
+        discogsTokenInvalid: translations.pt.table.discogsTokenInvalid,
+        noReleaseForSync: translations.pt.table.noReleaseForSync,
+        syncSummary: translations.pt.table.syncSummary,
+      }
+    : {
+        selectAllForSync: translations.en.table.selectAllForSync,
+        selectRecordForSync: translations.en.table.selectRecordForSync,
+        recordsSelectedForSync: translations.en.table.recordsSelectedForSync,
+        discogsSyncSelected: translations.en.table.discogsSyncSelected,
+        clearSyncSelection: translations.en.table.clearSyncSelection,
+        syncingWithDiscogs: translations.en.table.syncingWithDiscogs,
+        discogsTokenPrompt: translations.en.table.discogsTokenPrompt,
+        discogsTokenInvalid: translations.en.table.discogsTokenInvalid,
+        noReleaseForSync: translations.en.table.noReleaseForSync,
+        syncSummary: translations.en.table.syncSummary,
       }
 
   useEffect(() => {
@@ -305,6 +333,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const unpricedFilteredRecords = filteredData.filter(hasNoDiscogsPrice)
   const selectedFilteredUnpricedCount = unpricedFilteredRecords.filter((record) => selectedPriceIds.has(record.id)).length
   const selectedUnpricedRecords = data.filter((record) => selectedPriceIds.has(record.id) && hasNoDiscogsPrice(record))
+  const selectedFilteredSyncCount = filteredData.filter((record) => selectedSyncIds.has(record.id)).length
 
   const dropdownOptions = useMemo<Record<string, string[]>>(() => {
     const options: Record<string, string[]> = {}
@@ -370,6 +399,87 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       }
       return next
     })
+  }
+
+  function toggleAllForSync(checked: boolean) {
+    setSelectedSyncIds((current) => {
+      const next = new Set(current)
+      for (const record of filteredData) {
+        if (checked) next.add(record.id)
+        else next.delete(record.id)
+      }
+      return next
+    })
+  }
+
+  async function syncSelectedRecords() {
+    if (isSyncLoading) return
+
+    const syncableRecords = data
+      .filter((record) => selectedSyncIds.has(record.id))
+      .map((record) => ({ record, releaseId: getDiscogsReleaseId(record.discogs_link) }))
+      .filter((entry): entry is { record: VinylRecord; releaseId: number } => entry.releaseId !== null)
+
+    if (syncableRecords.length === 0) {
+      setSyncSummary(syncUiText.noReleaseForSync)
+      return
+    }
+
+    let token = window.localStorage.getItem('spindex-discogs-token') ?? ''
+    if (!token) {
+      token = window.prompt(syncUiText.discogsTokenPrompt)?.trim() ?? ''
+      if (!token) return
+    }
+
+    setIsSyncLoading(true)
+    setSyncSummary(null)
+
+    try {
+      const response = await syncRecordsToDiscogs(
+        token,
+        syncableRecords.map(({ record, releaseId }) => ({ id: record.id, discogsReleaseId: releaseId })),
+      )
+      window.localStorage.setItem('spindex-discogs-token', token)
+
+      const syncedAt = new Date().toISOString()
+      const syncedIds = new Set(
+        response.results
+          .filter((result) => result.status === 'added' || result.status === 'already_in_collection')
+          .map((result) => result.id),
+      )
+
+      setData((current) => current.map((item) =>
+        syncedIds.has(item.id) ? { ...item, discogs_synced_at: syncedAt } : item
+      ))
+      setSelectedSyncIds((current) => {
+        const next = new Set(current)
+        syncedIds.forEach((id) => next.delete(id))
+        return next
+      })
+
+      setSyncSummary(syncUiText.syncSummary
+        .replace('{username}', response.username)
+        .replace('{added}', String(response.summary.added))
+        .replace('{alreadyInCollection}', String(response.summary.alreadyInCollection))
+        .replace('{noRelease}', String(response.summary.noRelease))
+        .replace('{failed}', String(response.summary.failed)))
+    } catch (error) {
+      console.error('Discogs sync failed:', error)
+      const message = error instanceof Error ? error.message : String(error)
+      if (/token|401/i.test(message)) {
+        window.localStorage.removeItem('spindex-discogs-token')
+        const retryToken = window.prompt(syncUiText.discogsTokenInvalid)?.trim() ?? ''
+        if (retryToken) {
+          window.localStorage.setItem('spindex-discogs-token', retryToken)
+          setSyncSummary(null)
+          setIsSyncLoading(false)
+          return syncSelectedRecords()
+        }
+      }
+      setSyncSummary(`⚠️ ${message}`)
+    } finally {
+      setIsSyncLoading(false)
+    }
   }
 
   async function autoFillSelectedPrices() {
@@ -536,6 +646,70 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       },
     },
     {
+      accessorKey: 'price_on_discogs',
+      header: t.priceOnDiscogs,
+      cell: ({ row }) => {
+        const price = row.original.price_on_discogs
+        return price === null || price === undefined
+          ? '-'
+          : new Intl.NumberFormat(language === 'pt' ? 'pt-BR' : 'en-US', {
+              style: 'currency',
+              currency: 'USD',
+            }).format(price)
+      },
+    },
+    {
+      id: 'discogsSync',
+      header: () => (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={`h-8 w-8 ${selectedFilteredSyncCount > 0 && selectedFilteredSyncCount === filteredData.length ? 'text-brand-green' : 'text-muted-foreground'}`}
+          aria-label={syncUiText.selectAllForSync}
+          title={syncUiText.selectAllForSync}
+          disabled={filteredData.length === 0}
+          onClick={() => toggleAllForSync(selectedFilteredSyncCount !== filteredData.length)}
+        >
+          <Disc3
+            aria-hidden="true"
+            fill={selectedFilteredSyncCount > 0 ? 'currentColor' : 'none'}
+            fillOpacity={selectedFilteredSyncCount > 0 ? (selectedFilteredSyncCount === filteredData.length ? 0.25 : 0.1) : 0}
+          />
+        </Button>
+      ),
+      enableSorting: false,
+      size: 44,
+      cell: ({ row }) => {
+        const record = row.original
+        const isSynced = Boolean(record.discogs_synced_at)
+        const isSelected = selectedSyncIds.has(record.id)
+        const isHighlighted = isSynced || isSelected
+        const label = isSynced
+          ? t.discogsSynced
+          : `${syncUiText.selectRecordForSync}: ${record.artist ?? ''} - ${record.title ?? ''}`
+        return (
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`h-8 w-8 ${isSynced ? 'text-brand-green' : isSelected ? 'text-brand-blue' : 'text-muted-foreground'}`}
+            aria-label={label}
+            aria-pressed={isSelected}
+            title={label}
+            onClick={() => {
+              setSelectedSyncIds((current) => {
+                const next = new Set(current)
+                if (next.has(record.id)) next.delete(record.id)
+                else next.add(record.id)
+                return next
+              })
+            }}
+          >
+            <Disc3 aria-hidden="true" fill={isHighlighted ? 'currentColor' : 'none'} fillOpacity={isHighlighted ? 0.25 : 0} />
+          </Button>
+        )
+      },
+    },
+    {
       id: 'actions',
       header: t.actions,
       enableSorting: false,
@@ -543,7 +717,6 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         const record = row.original
         const isPending = pendingActionId === record.id
         let sourceUrl: string | null = null
-        let discogsUrl: string | null = null
         try {
           const parsedSourceUrl = new URL(record.source_url ?? '')
           if (parsedSourceUrl.protocol === 'http:' || parsedSourceUrl.protocol === 'https:') {
@@ -551,16 +724,6 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           }
         } catch {
           sourceUrl = null
-        }
-        try {
-          const parsedDiscogsUrl = new URL(record.discogs_link ?? '')
-          const isDiscogsHost = parsedDiscogsUrl.hostname === 'discogs.com'
-            || parsedDiscogsUrl.hostname.endsWith('.discogs.com')
-          if (isDiscogsHost && (parsedDiscogsUrl.protocol === 'http:' || parsedDiscogsUrl.protocol === 'https:')) {
-            discogsUrl = parsedDiscogsUrl.href
-          }
-        } catch {
-          discogsUrl = null
         }
 
         return (
@@ -587,18 +750,6 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               >
                 <span aria-hidden="true" className="flex h-4 w-4 items-end justify-center rounded-[3px] bg-muted-foreground text-[14px] font-bold leading-[14px] text-background">f</span>
               </Button>
-            )}
-            {discogsUrl && (
-              <a
-                href={discogsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={t.openDiscogsRelease}
-                title={t.openDiscogsRelease}
-              >
-                <Disc3 aria-hidden="true" />
-              </a>
             )}
             <Button
               variant="ghost"
@@ -783,6 +934,53 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         </div>
       )}
       {batchPriceSummary && <p className="mb-3 text-sm text-muted-foreground" role="status">{batchPriceSummary}</p>}
+
+      {(selectedSyncIds.size > 0 || isSyncLoading) && (
+        <div className="mb-3 flex flex-col gap-3 rounded-md border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              aria-label={syncUiText.selectAllForSync}
+              title={syncUiText.selectAllForSync}
+              checked={filteredData.length > 0 && selectedFilteredSyncCount === filteredData.length
+                ? true
+                : selectedFilteredSyncCount > 0 ? 'indeterminate' : false}
+              disabled={filteredData.length === 0 || isSyncLoading}
+              onCheckedChange={(checked) => toggleAllForSync(checked === true)}
+            />
+            <p className="text-sm text-muted-foreground">
+              {isSyncLoading
+                ? syncUiText.syncingWithDiscogs
+                : `${selectedSyncIds.size} ${syncUiText.recordsSelectedForSync}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              disabled={selectedSyncIds.size === 0 || isSyncLoading}
+              onClick={() => void syncSelectedRecords()}
+            >
+              {isSyncLoading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Disc3 aria-hidden="true" />}
+              {isSyncLoading ? syncUiText.syncingWithDiscogs : syncUiText.discogsSyncSelected}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={isSyncLoading}
+              onClick={() => setSelectedSyncIds(new Set())}
+            >
+              {syncUiText.clearSyncSelection}
+            </Button>
+          </div>
+        </div>
+      )}
+      {syncSummary && (
+        <p
+          className={`mb-3 text-sm ${syncSummary.startsWith('⚠️') ? 'text-destructive' : 'text-muted-foreground'}`}
+          role="status"
+        >
+          {syncSummary}
+        </p>
+      )}
 
       <div className="overflow-hidden rounded-md border bg-card shadow-sm">
         <Table>

@@ -21,6 +21,8 @@ export type VinylRecord = {
   sell_possibility?: boolean | null
   sold?: boolean | null
   discogs_lowest_price?: number | null
+  price_on_discogs?: number | null
+  discogs_synced_at?: string | null
   marketplace_price?: number | null
   marketplace_currency?: string | null
   notes?: string | null
