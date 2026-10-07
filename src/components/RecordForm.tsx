@@ -60,7 +60,7 @@ function createFormSchema(language: Language) {
 type FormInput = z.input<ReturnType<typeof createFormSchema>>
 type FormValues = z.output<ReturnType<typeof createFormSchema>>
 
-export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, onUploadPicture, onUploadOriginalImage, onSuccess }: {
+export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, onUploadPicture, onUploadOriginalImage, onSuccess, onSaveAndNext }: {
   language: Language
   record?: VinylRecord
   initialValues?: Partial<VinylRecord>
@@ -69,6 +69,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   onUploadPicture?: () => void
   onUploadOriginalImage?: () => Promise<string>
   onSuccess?: (values: FormValues) => void
+  onSaveAndNext?: (values: FormValues) => void
 }) {
   const t = translations[language].form
   const [discogsSearching, setDiscogsSearching] = useState(false)
@@ -165,7 +166,12 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       alert(`${t.databaseError} ${error.message}`)
       return
     }
-    
+
+    if (onSaveAndNext) {
+      onSaveAndNext(valuesToSave)
+      return
+    }
+
     onSuccess?.(valuesToSave)
   }
 
@@ -682,7 +688,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
         </div>
 
         <Button type="submit" className="mt-4 w-full" disabled={form.formState.isSubmitting}>
-          {record ? t.saveChanges : t.save}
+          {record ? (onSaveAndNext ? t.saveAndNext : t.saveChanges) : t.save}
         </Button>
       </form>
       <Dialog

@@ -118,6 +118,8 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const [previewingRecord, setPreviewingRecord] = useState<VinylRecord | null>(null)
   const [editingRecord, setEditingRecord] = useState<VinylRecord | null>(null)
   const [editAutoSearch, setEditAutoSearch] = useState(false)
+  const [batchSyncRecords, setBatchSyncRecords] = useState<VinylRecord[] | null>(null)
+  const [batchSyncIndex, setBatchSyncIndex] = useState(0)
   const [deletingRecord, setDeletingRecord] = useState<VinylRecord | null>(null)
   const [pendingActionId, setPendingActionId] = useState<string | null>(null)
   const [pendingPriceId, setPendingPriceId] = useState<string | null>(null)
@@ -456,6 +458,32 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       }
       return next
     })
+  }
+
+  // Open the batch flow: edit each record without a Discogs link, one by one.
+  function startBatchSync() {
+    const withoutLink = data.filter((record) => getDiscogsReleaseId(record.discogs_link) === null)
+    if (withoutLink.length === 0) return
+    setBatchSyncRecords(withoutLink)
+    setBatchSyncIndex(0)
+  }
+
+  function closeBatchSync() {
+    setBatchSyncRecords(null)
+    setBatchSyncIndex(0)
+  }
+
+  function handleBatchSave(savedValues: Partial<VinylRecord>) {
+    if (!batchSyncRecords) return
+    const currentRecord = batchSyncRecords[batchSyncIndex]
+    setData((current) => current.map((item) =>
+      item.id === currentRecord.id ? { ...item, ...savedValues } : item,
+    ))
+    if (batchSyncIndex + 1 < batchSyncRecords.length) {
+      setBatchSyncIndex((index) => index + 1)
+    } else {
+      closeBatchSync()
+    }
   }
 
   // Remove a single record from the Discogs collection (from the synced row menu).
@@ -1138,6 +1166,17 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       )}
       {batchPriceSummary && <p className="mb-3 text-sm text-muted-foreground" role="status">{batchPriceSummary}</p>}
 
+      <div className="mb-3 flex justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={startBatchSync}
+        >
+          <Disc3 aria-hidden="true" />
+          {translations[language].app.batchDiscogsSync}
+        </Button>
+      </div>
+
       {(selectedSyncIds.size > 0 || isSyncLoading) && (
         <div className="mb-3 flex flex-col gap-3 rounded-md border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
@@ -1406,6 +1445,30 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
                 ))
                 setEditingRecord(null)
               }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={batchSyncRecords !== null} onOpenChange={(open) => !open && closeBatchSync()}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>{translations[language].app.batchDiscogsSync}</DialogTitle>
+            {batchSyncRecords && (
+              <p className="text-sm text-muted-foreground">
+                {translations[language].app.batchDiscogsSyncProgress
+                  .replace('{current}', String(batchSyncIndex + 1))
+                  .replace('{total}', String(batchSyncRecords.length))}
+              </p>
+            )}
+          </DialogHeader>
+          {batchSyncRecords && batchSyncRecords[batchSyncIndex] && (
+            <RecordForm
+              key={batchSyncRecords[batchSyncIndex].id}
+              language={language}
+              record={batchSyncRecords[batchSyncIndex]}
+              autoSearchDiscogs
+              onSaveAndNext={(values) => handleBatchSave(values)}
             />
           )}
         </DialogContent>
