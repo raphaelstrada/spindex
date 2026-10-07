@@ -26,6 +26,28 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// Discogs allows 60 req/min per token. Each record costs 2 requests (check + add/remove),
+// so ~2.2s between records keeps us well under the limit.
+const RECORD_DELAY_MS = 2200
+
+// When Discogs answers 429, wait for the Retry-After hint (or a safe default) and retry.
+async function fetchDiscogs(url: string, init: RequestInit, maxAttempts = 3): Promise<Response> {
+  let response: Response | null = null
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    response = await fetch(url, init)
+    if (response.status !== 429 || attempt === maxAttempts) return response
+
+    const retryAfterSeconds = Number(response.headers.get('Retry-After'))
+    const waitMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+      ? retryAfterSeconds * 1000
+      : 10_000 * attempt
+    console.log(`Discogs rate limited (429). Waiting ${waitMs}ms before retry ${attempt + 1}/${maxAttempts}.`)
+    await response.body?.cancel()
+    await sleep(waitMs)
+  }
+  return response!
+}
+
 async function markRecordsSynced(ids: string[], synced: boolean) {
   // Uses the PostgREST API directly so this function has zero external dependencies.
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
@@ -106,11 +128,11 @@ Deno.serve(async (request) => {
     const results: SyncResult[] = []
 
     for (const [index, record] of records.entries()) {
-      if (index > 0) await sleep(1100) // stay under the Discogs rate limit (60 req/min)
+      if (index > 0) await sleep(RECORD_DELAY_MS)
 
       try {
         // Locate the release in the user's collection (also the anti-duplication check).
-        const existingResponse = await fetch(
+        const existingResponse = await fetchDiscogs(
           `https://api.discogs.com/users/${encodeURIComponent(username)}/collection/releases/${record.discogsReleaseId}`,
           { headers: discogsHeaders },
         )
@@ -141,7 +163,7 @@ Deno.serve(async (request) => {
           }
 
           // Not in the collection yet: add to folder 1 ("All").
-          const addResponse = await fetch(
+          const addResponse = await fetchDiscogs(
             `https://api.discogs.com/users/${encodeURIComponent(username)}/collection/folders/1/releases/${record.discogsReleaseId}`,
             { method: 'POST', headers: { ...discogsHeaders, 'Content-Type': 'application/json' }, body: '{}' },
           )
@@ -159,7 +181,7 @@ Deno.serve(async (request) => {
             continue
           }
 
-          const removeResponse = await fetch(
+          const removeResponse = await fetchDiscogs(
             `https://api.discogs.com/users/${encodeURIComponent(username)}/collection/folders/1/releases/${record.discogsReleaseId}/instances/${instanceId}`,
             { method: 'DELETE', headers: discogsHeaders },
           )

@@ -49,7 +49,7 @@ import {
 } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
 import { getCollectionOwner } from '@/lib/collection'
-import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, syncRecordsToDiscogs } from '@/lib/discogs'
+import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, syncRecordsToDiscogs, type DiscogsSyncResult } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 
@@ -117,7 +117,9 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const [selectedPriceIds, setSelectedPriceIds] = useState<Set<string>>(new Set())
   const [selectedSyncIds, setSelectedSyncIds] = useState<Set<string>>(new Set())
   const [isSyncLoading, setIsSyncLoading] = useState(false)
+  const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null)
   const [syncSummary, setSyncSummary] = useState<string | null>(null)
+  const [syncDetails, setSyncDetails] = useState<{ record: VinylRecord; status: string; detail?: string }[] | null>(null)
   const [isBatchPriceLoading, setIsBatchPriceLoading] = useState(false)
   const [batchPriceProgress, setBatchPriceProgress] = useState<{ current: number; total: number } | null>(null)
   const [batchPriceSummary, setBatchPriceSummary] = useState<string | null>(null)
@@ -158,6 +160,8 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         removingFromDiscogs: translations.pt.table.removingFromDiscogs,
         confirmRemoveFromDiscogs: translations.pt.table.confirmRemoveFromDiscogs,
         removeSummary: translations.pt.table.removeSummary,
+        syncingProgress: translations.pt.table.syncingProgress,
+        syncResultsTitle: translations.pt.table.syncResultsTitle,
       }
     : {
         selectAllForSync: translations.en.table.selectAllForSync,
@@ -174,6 +178,8 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         removingFromDiscogs: translations.en.table.removingFromDiscogs,
         confirmRemoveFromDiscogs: translations.en.table.confirmRemoveFromDiscogs,
         removeSummary: translations.en.table.removeSummary,
+        syncingProgress: translations.en.table.syncingProgress,
+        syncResultsTitle: translations.en.table.syncResultsTitle,
       }
 
   useEffect(() => {
@@ -448,60 +454,92 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
 
     setIsSyncLoading(true)
     setSyncSummary(null)
+    setSyncDetails(null)
+
+    // Process in chunks so large batches show progress and stay within function timeouts.
+    const chunkSize = 50
+    const chunks: typeof syncableRecords[] = []
+    for (let index = 0; index < syncableRecords.length; index += chunkSize) {
+      chunks.push(syncableRecords.slice(index, index + chunkSize))
+    }
+
+    const recordById = new Map(syncableRecords.map(({ record }) => [record.id, record]))
+    const allResults: DiscogsSyncResult[] = []
+    const totals = { added: 0, alreadyInCollection: 0, removed: 0, notInCollection: 0, noRelease: 0, failed: 0 }
+    let username = ''
+    let processed = 0
 
     try {
-      const response = await syncRecordsToDiscogs(
-        token,
-        syncableRecords.map(({ record, releaseId }) => ({ id: record.id, discogsReleaseId: releaseId })),
-        action,
-      )
-      window.localStorage.setItem('spindex-discogs-token', token)
-
-      if (action === 'add') {
-        const syncedAt = new Date().toISOString()
-        const syncedIds = new Set(
-          response.results
-            .filter((result) => result.status === 'added' || result.status === 'already_in_collection')
-            .map((result) => result.id),
+      for (const chunk of chunks) {
+        const response = await syncRecordsToDiscogs(
+          token,
+          chunk.map(({ record, releaseId }) => ({ id: record.id, discogsReleaseId: releaseId })),
+          action,
         )
-
-        setData((current) => current.map((item) =>
-          syncedIds.has(item.id) ? { ...item, discogs_synced_at: syncedAt } : item
-        ))
-        setSelectedSyncIds((current) => {
-          const next = new Set(current)
-          syncedIds.forEach((id) => next.delete(id))
-          return next
-        })
-
-        setSyncSummary(syncUiText.syncSummary
-          .replace('{username}', response.username)
-          .replace('{added}', String(response.summary.added))
-          .replace('{alreadyInCollection}', String(response.summary.alreadyInCollection))
-          .replace('{noRelease}', String(response.summary.noRelease))
-          .replace('{failed}', String(response.summary.failed)))
-      } else {
-        const removedIds = new Set(
-          response.results
-            .filter((result) => result.status === 'removed' || result.status === 'not_in_collection')
-            .map((result) => result.id),
-        )
-
-        setData((current) => current.map((item) =>
-          removedIds.has(item.id) ? { ...item, discogs_synced_at: null } : item
-        ))
-        setSelectedSyncIds((current) => {
-          const next = new Set(current)
-          removedIds.forEach((id) => next.delete(id))
-          return next
-        })
-
-        setSyncSummary(syncUiText.removeSummary
-          .replace('{username}', response.username)
-          .replace('{removed}', String(response.summary.removed))
-          .replace('{notInCollection}', String(response.summary.notInCollection))
-          .replace('{failed}', String(response.summary.failed)))
+        window.localStorage.setItem('spindex-discogs-token', token)
+        username = response.username
+        allResults.push(...response.results)
+        totals.added += response.summary.added
+        totals.alreadyInCollection += response.summary.alreadyInCollection
+        totals.removed += response.summary.removed
+        totals.notInCollection += response.summary.notInCollection
+        totals.noRelease += response.summary.noRelease
+        totals.failed += response.summary.failed
+        processed += chunk.length
+        setSyncProgress({ current: processed, total: syncableRecords.length })
       }
+
+      // Apply state changes based on per-record outcomes.
+      const syncedAt = new Date().toISOString()
+      const addedIds = new Set(allResults
+        .filter((result) => result.status === 'added' || result.status === 'already_in_collection')
+        .map((result) => result.id))
+      const removedIds = new Set(allResults
+        .filter((result) => result.status === 'removed' || result.status === 'not_in_collection')
+        .map((result) => result.id))
+
+      setData((current) => current.map((item) => {
+        if (action === 'add' && addedIds.has(item.id)) return { ...item, discogs_synced_at: syncedAt }
+        if (action === 'remove' && removedIds.has(item.id)) return { ...item, discogs_synced_at: null }
+        return item
+      }))
+      setSelectedSyncIds((current) => {
+        const next = new Set(current)
+        const doneIds = action === 'add' ? addedIds : removedIds
+        doneIds.forEach((id) => next.delete(id))
+        return next
+      })
+
+      setSyncSummary(action === 'add'
+        ? syncUiText.syncSummary
+            .replace('{username}', username)
+            .replace('{added}', String(totals.added))
+            .replace('{alreadyInCollection}', String(totals.alreadyInCollection))
+            .replace('{noRelease}', String(totals.noRelease))
+            .replace('{failed}', String(totals.failed))
+        : syncUiText.removeSummary
+            .replace('{username}', username)
+            .replace('{removed}', String(totals.removed))
+            .replace('{notInCollection}', String(totals.notInCollection))
+            .replace('{failed}', String(totals.failed)))
+
+      // Per-record report so the user can see exactly why each one was not synced.
+      setSyncDetails(allResults.map((result) => {
+        const record = recordById.get(result.id)
+        const statusLabels: Record<DiscogsSyncResult['status'], string> = {
+          added: translations[language].table.syncDetailAdded,
+          already_in_collection: translations[language].table.syncDetailAlreadyInCollection,
+          removed: translations[language].table.syncDetailRemoved,
+          not_in_collection: translations[language].table.syncDetailNotInCollection,
+          no_release: translations[language].table.syncDetailNoRelease,
+          failed: translations[language].table.syncDetailFailed,
+        }
+        return {
+          record: record ?? ({ id: result.id, artist: result.id, title: null } as VinylRecord),
+          status: statusLabels[result.status],
+          detail: result.error,
+        }
+      }))
     } catch (error) {
       console.error('Discogs sync failed:', error)
       const message = error instanceof Error ? error.message : String(error)
@@ -512,12 +550,14 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           window.localStorage.setItem('spindex-discogs-token', retryToken)
           setSyncSummary(null)
           setIsSyncLoading(false)
+          setSyncProgress(null)
           return runDiscogsSync(action)
         }
       }
       setSyncSummary(`⚠️ ${message}`)
     } finally {
       setIsSyncLoading(false)
+      setSyncProgress(null)
     }
   }
 
@@ -992,7 +1032,11 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
             />
             <p className="text-sm text-muted-foreground">
               {isSyncLoading
-                ? syncUiText.syncingWithDiscogs
+                ? syncProgress
+                  ? syncUiText.syncingProgress
+                      .replace('{current}', String(syncProgress.current))
+                      .replace('{total}', String(syncProgress.total))
+                  : syncUiText.syncingWithDiscogs
                 : `${selectedSyncIds.size} ${syncUiText.recordsSelectedForSync}`}
             </p>
           </div>
@@ -1032,6 +1076,28 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         >
           {syncSummary}
         </p>
+      )}
+      {syncDetails && syncDetails.length > 0 && (
+        <details className="mb-3 rounded-md border bg-card px-3 py-2.5 text-sm">
+          <summary className="cursor-pointer font-medium">
+            {syncUiText.syncResultsTitle} ({syncDetails.length})
+          </summary>
+          <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+            {syncDetails.map(({ record, status, detail }) => {
+              const isFailure = Boolean(detail)
+              return (
+                <li key={record.id} className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="min-w-0 truncate">
+                    {record.artist ?? '-'} — {record.title ?? '-'}
+                  </span>
+                  <span className={isFailure ? 'text-destructive' : 'text-muted-foreground'}>
+                    {status}{detail ? `: ${detail}` : ''}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        </details>
       )}
 
       <div className="overflow-hidden rounded-md border bg-card shadow-sm">
