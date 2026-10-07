@@ -88,7 +88,7 @@ export async function getDiscogsLowestPrice(releaseId: number): Promise<DiscogsP
 
 export type DiscogsSyncResult = {
   id: string
-  status: 'added' | 'already_in_collection' | 'no_release' | 'failed'
+  status: 'added' | 'already_in_collection' | 'removed' | 'not_in_collection' | 'no_release' | 'failed'
   error?: string
 }
 
@@ -97,6 +97,8 @@ export type DiscogsSyncResponse = {
   summary: {
     added: number
     alreadyInCollection: number
+    removed: number
+    notInCollection: number
     noRelease: number
     failed: number
   }
@@ -139,10 +141,11 @@ async function extractFunctionError(error: unknown, functionName: string): Promi
 export async function syncRecordsToDiscogs(
   discogsToken: string,
   records: { id: string; discogsReleaseId: number }[],
+  action: 'add' | 'remove' = 'add',
 ): Promise<DiscogsSyncResponse> {
   const { data, error } = await supabase.functions.invoke<DiscogsSyncResponse>(
     'discogs-sync',
-    { body: { discogsToken, records } },
+    { body: { discogsToken, records, action } },
   )
 
   if (error) {

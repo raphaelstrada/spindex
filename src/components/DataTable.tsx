@@ -154,6 +154,10 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         discogsTokenInvalid: translations.pt.table.discogsTokenInvalid,
         noReleaseForSync: translations.pt.table.noReleaseForSync,
         syncSummary: translations.pt.table.syncSummary,
+        removeFromDiscogs: translations.pt.table.removeFromDiscogs,
+        removingFromDiscogs: translations.pt.table.removingFromDiscogs,
+        confirmRemoveFromDiscogs: translations.pt.table.confirmRemoveFromDiscogs,
+        removeSummary: translations.pt.table.removeSummary,
       }
     : {
         selectAllForSync: translations.en.table.selectAllForSync,
@@ -166,6 +170,10 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         discogsTokenInvalid: translations.en.table.discogsTokenInvalid,
         noReleaseForSync: translations.en.table.noReleaseForSync,
         syncSummary: translations.en.table.syncSummary,
+        removeFromDiscogs: translations.en.table.removeFromDiscogs,
+        removingFromDiscogs: translations.en.table.removingFromDiscogs,
+        confirmRemoveFromDiscogs: translations.en.table.confirmRemoveFromDiscogs,
+        removeSummary: translations.en.table.removeSummary,
       }
 
   useEffect(() => {
@@ -412,7 +420,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     })
   }
 
-  async function syncSelectedRecords() {
+  async function runDiscogsSync(action: 'add' | 'remove') {
     if (isSyncLoading) return
 
     const syncableRecords = data
@@ -423,6 +431,13 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     if (syncableRecords.length === 0) {
       setSyncSummary(syncUiText.noReleaseForSync)
       return
+    }
+
+    if (action === 'remove') {
+      const confirmed = window.confirm(
+        syncUiText.confirmRemoveFromDiscogs.replace('{count}', String(syncableRecords.length)),
+      )
+      if (!confirmed) return
     }
 
     let token = window.localStorage.getItem('spindex-discogs-token') ?? ''
@@ -438,31 +453,55 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       const response = await syncRecordsToDiscogs(
         token,
         syncableRecords.map(({ record, releaseId }) => ({ id: record.id, discogsReleaseId: releaseId })),
+        action,
       )
       window.localStorage.setItem('spindex-discogs-token', token)
 
-      const syncedAt = new Date().toISOString()
-      const syncedIds = new Set(
-        response.results
-          .filter((result) => result.status === 'added' || result.status === 'already_in_collection')
-          .map((result) => result.id),
-      )
+      if (action === 'add') {
+        const syncedAt = new Date().toISOString()
+        const syncedIds = new Set(
+          response.results
+            .filter((result) => result.status === 'added' || result.status === 'already_in_collection')
+            .map((result) => result.id),
+        )
 
-      setData((current) => current.map((item) =>
-        syncedIds.has(item.id) ? { ...item, discogs_synced_at: syncedAt } : item
-      ))
-      setSelectedSyncIds((current) => {
-        const next = new Set(current)
-        syncedIds.forEach((id) => next.delete(id))
-        return next
-      })
+        setData((current) => current.map((item) =>
+          syncedIds.has(item.id) ? { ...item, discogs_synced_at: syncedAt } : item
+        ))
+        setSelectedSyncIds((current) => {
+          const next = new Set(current)
+          syncedIds.forEach((id) => next.delete(id))
+          return next
+        })
 
-      setSyncSummary(syncUiText.syncSummary
-        .replace('{username}', response.username)
-        .replace('{added}', String(response.summary.added))
-        .replace('{alreadyInCollection}', String(response.summary.alreadyInCollection))
-        .replace('{noRelease}', String(response.summary.noRelease))
-        .replace('{failed}', String(response.summary.failed)))
+        setSyncSummary(syncUiText.syncSummary
+          .replace('{username}', response.username)
+          .replace('{added}', String(response.summary.added))
+          .replace('{alreadyInCollection}', String(response.summary.alreadyInCollection))
+          .replace('{noRelease}', String(response.summary.noRelease))
+          .replace('{failed}', String(response.summary.failed)))
+      } else {
+        const removedIds = new Set(
+          response.results
+            .filter((result) => result.status === 'removed' || result.status === 'not_in_collection')
+            .map((result) => result.id),
+        )
+
+        setData((current) => current.map((item) =>
+          removedIds.has(item.id) ? { ...item, discogs_synced_at: null } : item
+        ))
+        setSelectedSyncIds((current) => {
+          const next = new Set(current)
+          removedIds.forEach((id) => next.delete(id))
+          return next
+        })
+
+        setSyncSummary(syncUiText.removeSummary
+          .replace('{username}', response.username)
+          .replace('{removed}', String(response.summary.removed))
+          .replace('{notInCollection}', String(response.summary.notInCollection))
+          .replace('{failed}', String(response.summary.failed)))
+      }
     } catch (error) {
       console.error('Discogs sync failed:', error)
       const message = error instanceof Error ? error.message : String(error)
@@ -473,13 +512,17 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           window.localStorage.setItem('spindex-discogs-token', retryToken)
           setSyncSummary(null)
           setIsSyncLoading(false)
-          return syncSelectedRecords()
+          return runDiscogsSync(action)
         }
       }
       setSyncSummary(`⚠️ ${message}`)
     } finally {
       setIsSyncLoading(false)
     }
+  }
+
+  function syncSelectedRecords() {
+    return runDiscogsSync('add')
   }
 
   async function autoFillSelectedPrices() {
@@ -961,6 +1004,15 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
             >
               {isSyncLoading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Disc3 aria-hidden="true" />}
               {isSyncLoading ? syncUiText.syncingWithDiscogs : syncUiText.discogsSyncSelected}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={selectedSyncIds.size === 0 || isSyncLoading}
+              onClick={() => void runDiscogsSync('remove')}
+            >
+              {isSyncLoading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+              {isSyncLoading ? syncUiText.removingFromDiscogs : syncUiText.removeFromDiscogs}
             </Button>
             <Button
               type="button"

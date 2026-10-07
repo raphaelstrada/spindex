@@ -11,7 +11,7 @@ type SyncRequestRecord = {
 
 type SyncResult = {
   id: string
-  status: 'added' | 'already_in_collection' | 'no_release' | 'failed'
+  status: 'added' | 'already_in_collection' | 'removed' | 'not_in_collection' | 'no_release' | 'failed'
   error?: string
 }
 
@@ -26,7 +26,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function markRecordsSynced(ids: string[]) {
+async function markRecordsSynced(ids: string[], synced: boolean) {
   // Uses the PostgREST API directly so this function has zero external dependencies.
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -42,12 +42,12 @@ async function markRecordsSynced(ids: string[]) {
         'Content-Type': 'application/json',
         Prefer: 'return=minimal',
       },
-      body: JSON.stringify({ discogs_synced_at: new Date().toISOString() }),
+      body: JSON.stringify({ discogs_synced_at: synced ? new Date().toISOString() : null }),
     },
   )
 
   if (!response.ok) {
-    console.error('Failed to mark records as synced:', response.status, await response.text())
+    console.error('Failed to update discogs_synced_at:', response.status, await response.text())
   }
 }
 
@@ -62,6 +62,7 @@ Deno.serve(async (request) => {
 
   try {
     const body = await request.json()
+    const action = body.action === 'remove' ? 'remove' : 'add'
     const discogsToken = typeof body.discogsToken === 'string' ? body.discogsToken.trim() : ''
     const records: SyncRequestRecord[] = Array.isArray(body.records)
       ? body.records
@@ -108,50 +109,89 @@ Deno.serve(async (request) => {
       if (index > 0) await sleep(1100) // stay under the Discogs rate limit (60 req/min)
 
       try {
-        // Anti-duplication: is this release already in the user's collection?
+        // Locate the release in the user's collection (also the anti-duplication check).
         const existingResponse = await fetch(
           `https://api.discogs.com/users/${encodeURIComponent(username)}/collection/releases/${record.discogsReleaseId}`,
           { headers: discogsHeaders },
         )
 
+        let instanceId: number | null = null
         if (existingResponse.ok) {
           const existing = await existingResponse.json()
           if (Array.isArray(existing.releases) && existing.releases.length > 0) {
-            results.push({ id: record.id, status: 'already_in_collection' })
+            const first = existing.releases[0]
+            instanceId = Number.isSafeInteger(first?.instance_id) ? first.instance_id : null
+          }
+        } else if (existingResponse.status === 404) {
+          if (action === 'add') {
+            // fall through to the add call below
+          } else {
+            results.push({ id: record.id, status: 'not_in_collection' })
             continue
           }
-        } else if (existingResponse.status !== 404) {
+        } else {
           results.push({ id: record.id, status: 'failed', error: `Collection check failed (HTTP ${existingResponse.status})` })
           continue
         }
 
-        // Not in the collection yet: add to folder 1 ("All").
-        const addResponse = await fetch(
-          `https://api.discogs.com/users/${encodeURIComponent(username)}/collection/folders/1/releases/${record.discogsReleaseId}`,
-          { method: 'POST', headers: { ...discogsHeaders, 'Content-Type': 'application/json' }, body: '{}' },
-        )
+        if (action === 'add') {
+          if (instanceId !== null) {
+            results.push({ id: record.id, status: 'already_in_collection' })
+            continue
+          }
 
-        if (addResponse.ok || addResponse.status === 201) {
-          results.push({ id: record.id, status: 'added' })
-        } else if (addResponse.status === 404) {
-          results.push({ id: record.id, status: 'no_release' })
+          // Not in the collection yet: add to folder 1 ("All").
+          const addResponse = await fetch(
+            `https://api.discogs.com/users/${encodeURIComponent(username)}/collection/folders/1/releases/${record.discogsReleaseId}`,
+            { method: 'POST', headers: { ...discogsHeaders, 'Content-Type': 'application/json' }, body: '{}' },
+          )
+
+          if (addResponse.ok || addResponse.status === 201) {
+            results.push({ id: record.id, status: 'added' })
+          } else if (addResponse.status === 404) {
+            results.push({ id: record.id, status: 'no_release' })
+          } else {
+            results.push({ id: record.id, status: 'failed', error: `Add failed (HTTP ${addResponse.status})` })
+          }
         } else {
-          results.push({ id: record.id, status: 'failed', error: `Add failed (HTTP ${addResponse.status})` })
+          if (instanceId === null) {
+            results.push({ id: record.id, status: 'not_in_collection' })
+            continue
+          }
+
+          const removeResponse = await fetch(
+            `https://api.discogs.com/users/${encodeURIComponent(username)}/collection/folders/1/releases/${record.discogsReleaseId}/instances/${instanceId}`,
+            { method: 'DELETE', headers: discogsHeaders },
+          )
+
+          if (removeResponse.ok || removeResponse.status === 204) {
+            results.push({ id: record.id, status: 'removed' })
+          } else if (removeResponse.status === 404) {
+            results.push({ id: record.id, status: 'not_in_collection' })
+          } else {
+            results.push({ id: record.id, status: 'failed', error: `Remove failed (HTTP ${removeResponse.status})` })
+          }
         }
       } catch (error) {
         results.push({ id: record.id, status: 'failed', error: error instanceof Error ? error.message : 'Unknown error' })
       }
     }
 
-    // Mark successfully synced records in the database.
+    // Update discogs_synced_at in the database for the records that changed state.
     const syncedIds = results
       .filter((result) => result.status === 'added' || result.status === 'already_in_collection')
       .map((result) => result.id)
-    await markRecordsSynced(syncedIds)
+    const removedIds = results
+      .filter((result) => result.status === 'removed' || result.status === 'not_in_collection')
+      .map((result) => result.id)
+    if (syncedIds.length > 0) await markRecordsSynced(syncedIds, true)
+    if (removedIds.length > 0) await markRecordsSynced(removedIds, false)
 
     const summary = {
       added: results.filter((result) => result.status === 'added').length,
       alreadyInCollection: results.filter((result) => result.status === 'already_in_collection').length,
+      removed: results.filter((result) => result.status === 'removed').length,
+      notInCollection: results.filter((result) => result.status === 'not_in_collection').length,
       noRelease: results.filter((result) => result.status === 'no_release').length,
       failed: results.filter((result) => result.status === 'failed').length,
     }
