@@ -1179,7 +1179,11 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
                 ].filter(Boolean).join(' ') || undefined
                 return (
                 <Fragment key={row.id}>
-                  <TableRow key={row.id} className={rowClass}>
+                  <TableRow
+                    key={row.id}
+                    className={rowClass}
+                    title={missingDiscogsLink ? t.noDiscogsLinkRow : undefined}
+                  >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id} className="px-3 py-2.5 align-middle">
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -1262,6 +1266,9 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
             <DialogTitle>{previewingRecord?.artist} - {previewingRecord?.title}</DialogTitle>
           </DialogHeader>
           <div className={`grid gap-4 ${previewingRecord?.image_url && previewingRecord.original_image_url ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
+            {!previewingRecord?.image_url && !previewingRecord?.original_image_url && (
+              <p className="text-sm text-muted-foreground">{t.noImage}</p>
+            )}
             {previewingRecord?.image_url && (
               <figure className="space-y-2">
                 <figcaption className="text-sm font-medium">{t.discogsCover}</figcaption>

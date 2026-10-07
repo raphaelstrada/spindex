@@ -60,7 +60,7 @@ function createFormSchema(language: Language) {
 type FormInput = z.input<ReturnType<typeof createFormSchema>>
 type FormValues = z.output<ReturnType<typeof createFormSchema>>
 
-export function RecordForm({ language, record, initialValues, showTopSaveButton = false, onUploadPicture, onUploadOriginalImage, onSuccess }: {
+export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, onUploadPicture, onUploadOriginalImage, onSuccess }: {
   language: Language
   record?: VinylRecord
   initialValues?: Partial<VinylRecord>
