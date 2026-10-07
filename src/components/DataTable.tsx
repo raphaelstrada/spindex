@@ -429,13 +429,19 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   async function runDiscogsSync(action: 'add' | 'remove') {
     if (isSyncLoading) return
 
-    const syncableRecords = data
-      .filter((record) => selectedSyncIds.has(record.id))
+    const selectedRecords = data.filter((record) => selectedSyncIds.has(record.id))
+    const syncableRecords = selectedRecords
       .map((record) => ({ record, releaseId: getDiscogsReleaseId(record.discogs_link) }))
       .filter((entry): entry is { record: VinylRecord; releaseId: number } => entry.releaseId !== null)
+    const skippedRecords = selectedRecords.filter((record) => getDiscogsReleaseId(record.discogs_link) === null)
 
     if (syncableRecords.length === 0) {
       setSyncSummary(syncUiText.noReleaseForSync)
+      setSyncDetails(skippedRecords.map((record) => ({
+        record,
+        status: translations[language].table.syncDetailSkipped,
+        detail: undefined,
+      })))
       return
     }
 
@@ -510,7 +516,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         return next
       })
 
-      setSyncSummary(action === 'add'
+      const baseSummary = action === 'add'
         ? syncUiText.syncSummary
             .replace('{username}', username)
             .replace('{added}', String(totals.added))
@@ -521,10 +527,20 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
             .replace('{username}', username)
             .replace('{removed}', String(totals.removed))
             .replace('{notInCollection}', String(totals.notInCollection))
-            .replace('{failed}', String(totals.failed)))
+            .replace('{failed}', String(totals.failed))
+
+      const skippedNote = skippedRecords.length > 0
+        ? ` ${translations[language].table.syncSkippedNoLink.replace('{count}', String(skippedRecords.length))}`
+        : ''
+      setSyncSummary(`${baseSummary}${skippedNote}`)
 
       // Per-record report so the user can see exactly why each one was not synced.
-      setSyncDetails(allResults.map((result) => {
+      const skippedDetails = skippedRecords.map((record) => ({
+        record,
+        status: translations[language].table.syncDetailSkipped,
+        detail: undefined as string | undefined,
+      }))
+      setSyncDetails([...skippedDetails, ...allResults.map((result) => {
         const record = recordById.get(result.id)
         const statusLabels: Record<DiscogsSyncResult['status'], string> = {
           added: translations[language].table.syncDetailAdded,
@@ -539,7 +555,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           status: statusLabels[result.status],
           detail: result.error,
         }
-      }))
+      })])
     } catch (error) {
       console.error('Discogs sync failed:', error)
       const message = error instanceof Error ? error.message : String(error)

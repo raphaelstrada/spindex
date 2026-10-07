@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -65,6 +65,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   record?: VinylRecord
   initialValues?: Partial<VinylRecord>
   showTopSaveButton?: boolean
+  autoSearchDiscogs?: boolean
   onUploadPicture?: () => void
   onUploadOriginalImage?: () => Promise<string>
   onSuccess?: (values: FormValues) => void
@@ -206,6 +207,15 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     }
   }
 
+  // When opened after a failed auto-fill, search Discogs suggestions right away.
+  const autoSearchTriggered = useRef(false)
+  useEffect(() => {
+    if (!autoSearchDiscogs || autoSearchTriggered.current) return
+    autoSearchTriggered.current = true
+    void handleDiscogsSearch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSearchDiscogs])
+
   async function selectDiscogsRelease(release: DiscogsRelease) {
     setSelectedDiscogsTitle(release.title)
     setSelectedDiscogsRelease({ ...release, lowestPrice: null, priceCurrency: 'USD' })
@@ -213,7 +223,6 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     setDiscogsResults([])
     setDiscogsPriceLookupComplete(false)
     setDiscogsPriceLoading(true)
-
     try {
       const priceStats = await getDiscogsLowestPrice(release.id)
         form.setValue('discogs_lowest_price', priceStats.lowestPrice ?? undefined, { 
