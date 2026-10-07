@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Disc3, Images, Moon, PenLine, Sun } from 'lucide-react'
+import { Barcode, Disc3, Images, Moon, PenLine, Sun } from 'lucide-react'
 import { RecordForm } from '@/components/RecordForm'
 import { PhotoRecordImport } from '@/components/PhotoRecordImport'
+import { BarcodeScanner } from '@/components/BarcodeScanner'
 import { DataTable } from '@/components/DataTable'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -15,12 +16,14 @@ import {
 import { translations, type Language } from '@/lib/i18n'
 import { Logo } from '@/components/Logo'
 
-type AddRecordPath = 'picture' | 'discogsUrl' | 'manual' | null
+type AddRecordPath = 'picture' | 'discogsUrl' | 'manual' | 'barcode' | null
 
 export default function App() {
   const [isOpen, setIsOpen] = useState(false)
   const [isPhotoImportOpen, setIsPhotoImportOpen] = useState(false)
   const [addRecordPath, setAddRecordPath] = useState<AddRecordPath>(null)
+  const [scannedBarcode, setScannedBarcode] = useState<string | null>(null)
+  const [barcodeError, setBarcodeError] = useState<string | null>(null)
   const [recordsVersion, setRecordsVersion] = useState(0)
   const [language, setLanguage] = useState<Language>(() =>
     window.localStorage.getItem('spindex-language') === 'pt' ? 'pt' : 'en',
@@ -130,6 +133,17 @@ export default function App() {
                   <button
                     type="button"
                     className="flex items-center gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setAddRecordPath('barcode')}
+                  >
+                    <Barcode aria-hidden="true" className="h-6 w-6 shrink-0 text-muted-foreground" />
+                    <span>
+                      <span className="block font-medium">{t.app.addRecordPathBarcode}</span>
+                      <span className="mt-0.5 block text-sm text-muted-foreground">{t.app.addRecordPathBarcodeHint}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex items-center gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => setAddRecordPath('manual')}
                   >
                     <PenLine aria-hidden="true" className="h-6 w-6 shrink-0 text-muted-foreground" />
@@ -139,10 +153,32 @@ export default function App() {
                     </span>
                   </button>
                 </div>
+              ) : addRecordPath === 'barcode' ? (
+                <div className="py-2">
+                  <BarcodeScanner
+                    language={language}
+                    onScan={(code) => {
+                      setScannedBarcode(code)
+                      setBarcodeError(null)
+                    }}
+                    onError={(message) => setBarcodeError(message)}
+                  />
+                  {scannedBarcode && (
+                    <p className="mt-2 text-sm text-muted-foreground" role="status">
+                      {t.app.barcodeScanned.replace('{code}', scannedBarcode)}
+                    </p>
+                  )}
+                  {barcodeError && (
+                    <p className="mt-2 text-sm text-destructive" role="alert">
+                      {t.app.barcodeError} {barcodeError}
+                    </p>
+                  )}
+                </div>
               ) : (
                 <RecordForm
                   language={language}
                   startWithDiscogsUrl={addRecordPath === 'discogsUrl'}
+                  initialBarcode={addRecordPath === 'barcode' ? scannedBarcode : null}
                   onSuccess={() => {
                     setIsOpen(false)
                     setAddRecordPath(null)

@@ -69,6 +69,22 @@ export async function searchDiscogsReleases(
   return data?.results ?? []
 }
 
+export async function searchDiscogsByBarcode(barcode: string): Promise<DiscogsRelease[]> {
+  const { data, error } = await supabase.functions.invoke<{ results: DiscogsRelease[] }>(
+    'discogs-search',
+    { body: { barcode } },
+  )
+
+  if (error) {
+    if (error.context instanceof Response) {
+      const details = await error.context.json().catch(() => null) as { error?: string } | null
+      throw new Error(details?.error || error.message)
+    }
+    throw new Error(error.message)
+  }
+  return data?.results ?? []
+}
+
 export async function getDiscogsLowestPrice(releaseId: number): Promise<DiscogsPriceStats> {
   const { data, error } = await supabase.functions.invoke<DiscogsPriceStats>(
     'discogs-search',
