@@ -144,19 +144,38 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     async function fetchRecords() {
       setIsLoading(true)
       setErrorMsg(null)
-      const { data: records, error } = await supabase
-        .from('vinyl_records')
-        .select('*')
-        .ilike('collection_owner', getCollectionOwner())
-        .order('artist', { ascending: true })
 
-      if (error) {
-        console.error('Supabase fetch error:', error)
-        setErrorMsg(error.message)
-      } else {
-        setData((records || []) as VinylRecord[])
+      const pageSize = 1000
+      const allRecords: VinylRecord[] = []
+      let from = 0
+
+      try {
+        // Supabase/PostgREST caps responses at 1000 rows, so paginate to fetch everything.
+        for (;;) {
+          const { data: records, error } = await supabase
+            .from('vinyl_records')
+            .select('*')
+            .ilike('collection_owner', getCollectionOwner())
+            .order('artist', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, from + pageSize - 1)
+
+          if (error) {
+            console.error('Supabase fetch error:', error)
+            setErrorMsg(error.message)
+            break
+          }
+
+          allRecords.push(...((records || []) as VinylRecord[]))
+
+          if (!records || records.length < pageSize) break
+          from += pageSize
+        }
+
+        if (allRecords.length > 0) setData(allRecords)
+      } finally {
+        setIsLoading(false)
       }
-      setIsLoading(false)
     }
     fetchRecords()
   }, [recordsVersion])
