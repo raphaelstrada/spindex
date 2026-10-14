@@ -67,14 +67,20 @@ Deno.serve(async (request) => {
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     const releaseUrl = typeof body.releaseUrl === 'string' ? body.releaseUrl.trim() : ''
     const priceReleaseId = typeof body.priceReleaseId === 'number' ? body.priceReleaseId : null
-    const barcode = typeof body.barcode === 'string' ? body.barcode.trim() : ''
     const country = typeof body.country === 'string' ? body.country.trim() : ''
     const year = typeof body.year === 'number' || typeof body.year === 'string'
       ? String(body.year).trim()
       : ''
+    const barcode = typeof body.barcode === 'string' || typeof body.barcode === 'number'
+      ? String(body.barcode).replace(/\D/g, '')
+      : ''
 
-    if ((priceReleaseId === null && !artist && !title && !releaseUrl && !barcode) || (priceReleaseId !== null && (!Number.isSafeInteger(priceReleaseId) || priceReleaseId <= 0)) || artist.length > 200 || title.length > 200 || releaseUrl.length > 500 || barcode.length > 50 || country.length > 100 || (year && !/^\d{4}$/.test(year))) {
-      return jsonResponse({ error: 'Provide an artist, an album title, a release URL, or a barcode.' }, 400)
+    if (body.barcode !== undefined && body.barcode !== null && !/^\d{8,14}$/.test(barcode)) {
+      return jsonResponse({ error: 'Enter a valid barcode (8 to 14 digits).' }, 400)
+    }
+
+    if ((priceReleaseId === null && !artist && !title && !releaseUrl && !barcode) || (priceReleaseId !== null && (!Number.isSafeInteger(priceReleaseId) || priceReleaseId <= 0)) || artist.length > 200 || title.length > 200 || releaseUrl.length > 500 || country.length > 100 || (year && !/^\d{4}$/.test(year))) {
+      return jsonResponse({ error: 'Provide an artist, an album title, or both.' }, 400)
     }
 
     const token = Deno.env.get('DISCOGS_TOKEN')
@@ -90,7 +96,7 @@ Deno.serve(async (request) => {
 
     const discogsHeaders = {
       Accept: 'application/vnd.discogs.v2.discogs+json',
-      'User-Agent': 'Spindex/1.0',
+      'User-Agent': 'VinylCatalog/1.0',
       Authorization: token
         ? `Discogs token=${token}`
         : `Discogs key=${consumerKey}, secret=${consumerSecret}`,
@@ -184,9 +190,9 @@ Deno.serve(async (request) => {
     searchUrl.searchParams.set('type', 'release')
     if (artist) searchUrl.searchParams.set('artist', artist)
     if (title) searchUrl.searchParams.set('release_title', title)
-    if (barcode) searchUrl.searchParams.set('barcode', barcode)
     if (country) searchUrl.searchParams.set('country', country)
     if (year) searchUrl.searchParams.set('year', year)
+    if (barcode) searchUrl.searchParams.set('barcode', barcode)
     searchUrl.searchParams.set('format', 'Vinyl')
     searchUrl.searchParams.set('per_page', '50')
 

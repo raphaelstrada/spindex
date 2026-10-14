@@ -92,7 +92,11 @@ export default function App() {
           </DropdownMenu>
           <Dialog open={isOpen} onOpenChange={(open) => {
             setIsOpen(open)
-            if (!open) setAddRecordPath(null)
+            if (!open) {
+              setAddRecordPath(null)
+              setScannedBarcode(null)
+              setBarcodeError(null)
+            }
           }}>
             <DialogTrigger asChild>
               <Button>{t.app.addRecord}</Button>
@@ -153,7 +157,7 @@ export default function App() {
                     </span>
                   </button>
                 </div>
-              ) : addRecordPath === 'barcode' ? (
+              ) : addRecordPath === 'barcode' && !scannedBarcode ? (
                 <div className="py-2">
                   <BarcodeScanner
                     language={language}
@@ -163,11 +167,6 @@ export default function App() {
                     }}
                     onError={(message) => setBarcodeError(message)}
                   />
-                  {scannedBarcode && (
-                    <p className="mt-2 text-sm text-muted-foreground" role="status">
-                      {t.app.barcodeScanned.replace('{code}', scannedBarcode)}
-                    </p>
-                  )}
                   {barcodeError && (
                     <p className="mt-2 text-sm text-destructive" role="alert">
                       {t.app.barcodeError} {barcodeError}
@@ -175,16 +174,25 @@ export default function App() {
                   )}
                 </div>
               ) : (
-                <RecordForm
-                  language={language}
-                  startWithDiscogsUrl={addRecordPath === 'discogsUrl'}
-                  initialBarcode={addRecordPath === 'barcode' ? scannedBarcode : null}
-                  onSuccess={() => {
-                    setIsOpen(false)
-                    setAddRecordPath(null)
-                    setRecordsVersion((version) => version + 1)
-                  }}
-                />
+                <>
+                  {addRecordPath === 'barcode' && scannedBarcode && (
+                    <p className="text-sm text-muted-foreground" role="status">
+                      {t.app.barcodeScanned.replace('{code}', scannedBarcode)}
+                    </p>
+                  )}
+                  <RecordForm
+                    language={language}
+                    startWithDiscogsUrl={addRecordPath === 'discogsUrl'}
+                    initialBarcode={addRecordPath === 'barcode' ? scannedBarcode : null}
+                    onSuccess={() => {
+                      setIsOpen(false)
+                      setAddRecordPath(null)
+                      setScannedBarcode(null)
+                      setBarcodeError(null)
+                      setRecordsVersion((version) => version + 1)
+                    }}
+                  />
+                </>
               )}
             </DialogContent>
           </Dialog>

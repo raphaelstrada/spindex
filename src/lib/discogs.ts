@@ -69,20 +69,34 @@ export async function searchDiscogsReleases(
   return data?.results ?? []
 }
 
-export async function searchDiscogsByBarcode(barcode: string): Promise<DiscogsRelease[]> {
-  const { data, error } = await supabase.functions.invoke<{ results: DiscogsRelease[] }>(
-    'discogs-search',
-    { body: { barcode } },
-  )
+/** Keeps only digits (removes spaces, dashes, etc.). */
+export function normalizeBarcode(raw: string): string {
+  return raw.replace(/\D/g, '')
+}
 
-  if (error) {
-    if (error.context instanceof Response) {
-      const details = await error.context.json().catch(() => null) as { error?: string } | null
-      throw new Error(details?.error || error.message)
-    }
-    throw new Error(error.message)
+/**
+ * UPC-A (12 digits) and EAN-13 (13 digits starting with 0) are the same product,
+ * but Discogs may have stored either form. Try both.
+ */
+export function barcodeVariants(raw: string): string[] {
+  const code = normalizeBarcode(raw)
+  const variants = new Set<string>([code])
+  if (code.length === 13 && code.startsWith('0')) variants.add(code.slice(1))
+  if (code.length === 12) variants.add(`0${code}`)
+  return [...variants]
+}
+
+export async function searchDiscogsByBarcode(barcode: string): Promise<DiscogsRelease[]> {
+  for (const code of barcodeVariants(barcode)) {
+    const { data, error } = await supabase.functions.invoke<{ results: DiscogsRelease[] }>(
+      'discogs-search',
+      { body: { barcode: code } },
+    )
+
+    if (error) throw await extractFunctionError(error, 'discogs-search')
+    if (data?.results?.length) return data.results
   }
-  return data?.results ?? []
+  return []
 }
 
 export async function getDiscogsLowestPrice(releaseId: number): Promise<DiscogsPriceStats> {
