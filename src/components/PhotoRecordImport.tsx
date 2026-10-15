@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Camera, Check, ImagePlus, Link2, LoaderCircle, Trash2 } from 'lucide-react'
+import { DiscogsCandidatePicker } from '@/components/DiscogsCandidatePicker'
 import { RecordForm } from '@/components/RecordForm'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -576,50 +577,18 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
           )}
         </div>
 
-        <section className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="text-sm font-semibold">{t.discogsOptions}</h4>
-            <span className="text-xs text-muted-foreground">{t.canadianFirst}</span>
-          </div>
-          {activeRecord.discogsError && (
-            <p role="alert" className="text-sm text-destructive">{activeRecord.discogsError}</p>
-          )}
-          {activeRecord.candidates.length > 0 ? (
-            <div className="grid max-h-56 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
-              {activeRecord.candidates.map((release) => {
-                const isSelected = activeRecord.selectedReleaseId === String(release.id)
-                return (
-                  <button
-                    key={release.id}
-                    type="button"
-                    className={`flex min-w-0 items-center gap-3 rounded-md border p-2 text-left transition-colors hover:bg-accent ${isSelected ? 'border-primary bg-accent/50' : ''}`}
-                    aria-pressed={isSelected}
-                    onClick={() => chooseRelease(activeRecord.id, String(release.id))}
-                  >
-                    <img src={release.thumbnail} alt="" className="h-14 w-14 shrink-0 rounded-sm object-cover" loading="lazy" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block line-clamp-2 text-sm font-medium">{release.title}</span>
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        {[release.year, release.country, release.format.join(', '), release.label[0]].filter(Boolean).join(' · ')}
-                      </span>
-                    </span>
-                    {isSelected && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
-                  </button>
-                )
-              })}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t.noDiscogsOptions}</p>
-          )}
-          <Button
-            type="button"
-            variant={activeRecord.selectedReleaseId === 'manual' ? 'secondary' : 'outline'}
-            size="sm"
-            onClick={() => chooseRelease(activeRecord.id, 'manual')}
-          >
-            {t.useRecognizedDetails}
-          </Button>
-        </section>
+        <DiscogsCandidatePicker
+          title={t.discogsOptions}
+          hint={t.canadianFirst}
+          error={activeRecord.discogsError}
+          candidates={activeRecord.candidates}
+          selectedId={activeRecord.selectedReleaseId === 'manual' ? null : activeRecord.selectedReleaseId}
+          emptyMessage={t.noDiscogsOptions}
+          actionLabel={t.useRecognizedDetails}
+          actionActive={activeRecord.selectedReleaseId === 'manual'}
+          onSelect={(releaseId) => chooseRelease(activeRecord.id, releaseId)}
+          onAction={() => chooseRelease(activeRecord.id, 'manual')}
+        />
 
         <div className="border-t pt-4">
           <RecordForm

@@ -649,13 +649,81 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           setSyncSummary(null)
           setIsSyncLoading(false)
           setSyncProgress(null)
-          return runDiscogsSync(action)
+          return runDiscogsSync(action, explicitRecords)
         }
       }
       setSyncSummary(`⚠️ ${message}`)
     } finally {
       setIsSyncLoading(false)
       setSyncProgress(null)
+    }
+  }
+
+  // A synced record changed its Discogs release: mirror it in the user's Discogs collection
+  // (remove the previous release, then add the new one) so Spindex never claims to be in sync
+  // while Discogs holds a different release, and no duplicate is left behind.
+  async function mirrorReleaseChangeToDiscogs(
+    recordId: string,
+    oldReleaseId: number | null,
+    newReleaseId: number | null,
+    isRetry = false,
+  ): Promise<void> {
+    const text = translations[language].table
+    const oldReleaseUrl = oldReleaseId ? `https://www.discogs.com/release/${oldReleaseId}` : ''
+
+    let token = window.localStorage.getItem('spindex-discogs-token') ?? ''
+    if (!token) token = window.prompt(text.discogsTokenPrompt)?.trim() ?? ''
+    if (!token) {
+      setSyncSummary(`⚠️ ${text.releaseChangeNoToken.replace('{url}', oldReleaseUrl)}`)
+      return
+    }
+
+    setIsSyncLoading(true)
+    setSyncSummary(null)
+    setSyncDetails(null)
+    let stage: 'remove' | 'add' = 'remove'
+
+    try {
+      if (oldReleaseId !== null) {
+        const removal = await syncRecordsToDiscogs(token, [{ id: recordId, discogsReleaseId: oldReleaseId }], 'remove')
+        window.localStorage.setItem('spindex-discogs-token', token)
+        const result = removal.results[0]
+        if (!result || (result.status !== 'removed' && result.status !== 'not_in_collection')) {
+          throw new Error(result?.error ?? result?.status ?? 'unknown error')
+        }
+      }
+
+      if (newReleaseId !== null) {
+        stage = 'add'
+        const addition = await syncRecordsToDiscogs(token, [{ id: recordId, discogsReleaseId: newReleaseId }], 'add')
+        window.localStorage.setItem('spindex-discogs-token', token)
+        const result = addition.results[0]
+        if (!result || (result.status !== 'added' && result.status !== 'already_in_collection')) {
+          throw new Error(result?.error ?? result?.status ?? 'unknown error')
+        }
+        const syncedAt = new Date().toISOString()
+        setData((current) => current.map((item) =>
+          item.id === recordId ? { ...item, discogs_synced_at: syncedAt } : item,
+        ))
+        setSyncSummary(text.releaseChangeSynced)
+      } else {
+        setSyncSummary(text.releaseChangeRemovedOnly)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('Mirroring the release change on Discogs failed:', error)
+      if (/token|401/i.test(message) && !isRetry) {
+        window.localStorage.removeItem('spindex-discogs-token')
+        const retryToken = window.prompt(text.discogsTokenInvalid)?.trim() ?? ''
+        if (retryToken) {
+          window.localStorage.setItem('spindex-discogs-token', retryToken)
+          return await mirrorReleaseChangeToDiscogs(recordId, oldReleaseId, newReleaseId, true)
+        }
+      }
+      const template = stage === 'remove' ? text.releaseChangeRemoveFailed : text.releaseChangeAddFailed
+      setSyncSummary(`⚠️ ${template.replace('{message}', message).replace('{url}', oldReleaseUrl)}`)
+    } finally {
+      setIsSyncLoading(false)
     }
   }
 
@@ -1457,10 +1525,17 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               record={editingRecord}
               autoSearchDiscogs={editAutoSearch}
               onSuccess={(values) => {
+                const previous = editingRecord
+                const oldReleaseId = getDiscogsReleaseId(previous.discogs_link)
+                const newReleaseId = getDiscogsReleaseId(values.discogs_link)
+                const releaseChanged = Boolean(previous.discogs_synced_at) && oldReleaseId !== newReleaseId
                 setData((current) => current.map((item) =>
-                  item.id === editingRecord.id ? { ...item, ...values } : item,
+                  item.id === previous.id
+                    ? { ...item, ...values, ...(releaseChanged ? { discogs_synced_at: null } : {}) }
+                    : item,
                 ))
                 setEditingRecord(null)
+                if (releaseChanged) void mirrorReleaseChangeToDiscogs(previous.id, oldReleaseId, newReleaseId)
               }}
             />
           )}

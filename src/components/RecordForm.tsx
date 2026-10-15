@@ -5,7 +5,7 @@ import * as z from 'zod'
 import { ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { getCollectionOwner } from '@/lib/collection'
-import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsByBarcode, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
+import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -60,11 +60,10 @@ function createFormSchema(language: Language) {
 type FormInput = z.input<ReturnType<typeof createFormSchema>>
 type FormValues = z.output<ReturnType<typeof createFormSchema>>
 
-export function RecordForm({ language, record, initialValues, initialBarcode = null, showTopSaveButton = false, autoSearchDiscogs = false, startWithDiscogsUrl = false, onUploadPicture, onUploadOriginalImage, onSuccess, onSaveAndNext }: {
+export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, startWithDiscogsUrl = false, onUploadPicture, onUploadOriginalImage, onSuccess, onSaveAndNext }: {
   language: Language
   record?: VinylRecord
   initialValues?: Partial<VinylRecord>
-  initialBarcode?: string | null
   showTopSaveButton?: boolean
   autoSearchDiscogs?: boolean
   startWithDiscogsUrl?: boolean
@@ -149,6 +148,10 @@ export function RecordForm({ language, record, initialValues, initialBarcode = n
       discogs_lowest_price: discogsLowestPrice,
       ...(originalImageUrl ? { original_image_url: originalImageUrl } : {}),
     }
+    // A synced record that now points to a different Discogs release (or none) is no longer
+    // in sync with the Discogs collection: never keep showing it as synced.
+    const releaseChanged = Boolean(record?.discogs_synced_at)
+      && getDiscogsReleaseId(record?.discogs_link) !== getDiscogsReleaseId(valuesToSave.discogs_link)
     const databaseValues = {
       ...valuesToSave,
       record_type: valuesToSave.record_type || null,
@@ -157,6 +160,7 @@ export function RecordForm({ language, record, initialValues, initialBarcode = n
       sleeve_condition: valuesToSave.sleeve_condition || null,
       marketplace_price: valuesToSave.marketplace_price ?? null,
       marketplace_currency: valuesToSave.marketplace_currency || null,
+      ...(releaseChanged ? { discogs_synced_at: null } : {}),
     }
     const { error } = record
       ? await supabase.from('vinyl_records').update(databaseValues).eq('id', record.id)
@@ -222,33 +226,6 @@ export function RecordForm({ language, record, initialValues, initialBarcode = n
     void handleDiscogsSearch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSearchDiscogs])
-
-  async function handleBarcodeSearch(barcode: string) {
-    setDiscogsResults([])
-    setDiscogsSearchError(null)
-    setDiscogsHasSearched(false)
-    setSelectedDiscogsTitle(null)
-    setSelectedDiscogsRelease(null)
-    setAppliedDiscogsFields(new Set())
-    setDiscogsSearching(true)
-    try {
-      setDiscogsResults(await searchDiscogsByBarcode(barcode))
-      setDiscogsHasSearched(true)
-    } catch (error) {
-      setDiscogsSearchError(error instanceof Error ? error.message : t.discogsSearchError)
-    } finally {
-      setDiscogsSearching(false)
-    }
-  }
-
-  // When opened after a barcode scan, look the barcode up on Discogs right away.
-  const barcodeSearchTriggered = useRef(false)
-  useEffect(() => {
-    if (!initialBarcode || barcodeSearchTriggered.current) return
-    barcodeSearchTriggered.current = true
-    void handleBarcodeSearch(initialBarcode)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialBarcode])
 
   async function selectDiscogsRelease(release: DiscogsRelease) {
     setSelectedDiscogsTitle(release.title)

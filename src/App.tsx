@@ -3,6 +3,7 @@ import { Barcode, Disc3, Images, Moon, PenLine, Sun } from 'lucide-react'
 import { RecordForm } from '@/components/RecordForm'
 import { PhotoRecordImport } from '@/components/PhotoRecordImport'
 import { BarcodeScanner } from '@/components/BarcodeScanner'
+import { BarcodeRecordImport } from '@/components/BarcodeRecordImport'
 import { DataTable } from '@/components/DataTable'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -43,6 +44,14 @@ export default function App() {
     document.title = t.app.title
     window.localStorage.setItem('spindex-language', language)
   }, [language, t.app.title])
+
+  function handleRecordAdded() {
+    setIsOpen(false)
+    setAddRecordPath(null)
+    setScannedBarcode(null)
+    setBarcodeError(null)
+    setRecordsVersion((version) => version + 1)
+  }
 
   return (
     <div className="container mx-auto max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 sm:py-8 2xl:px-8">
@@ -157,7 +166,17 @@ export default function App() {
                     </span>
                   </button>
                 </div>
-              ) : addRecordPath === 'barcode' && !scannedBarcode ? (
+              ) : addRecordPath === 'barcode' && scannedBarcode ? (
+                <BarcodeRecordImport
+                  language={language}
+                  barcode={scannedBarcode}
+                  onRescan={() => {
+                    setScannedBarcode(null)
+                    setBarcodeError(null)
+                  }}
+                  onSuccess={handleRecordAdded}
+                />
+              ) : addRecordPath === 'barcode' ? (
                 <div className="py-2">
                   <BarcodeScanner
                     language={language}
@@ -174,25 +193,11 @@ export default function App() {
                   )}
                 </div>
               ) : (
-                <>
-                  {addRecordPath === 'barcode' && scannedBarcode && (
-                    <p className="text-sm text-muted-foreground" role="status">
-                      {t.app.barcodeScanned.replace('{code}', scannedBarcode)}
-                    </p>
-                  )}
-                  <RecordForm
-                    language={language}
-                    startWithDiscogsUrl={addRecordPath === 'discogsUrl'}
-                    initialBarcode={addRecordPath === 'barcode' ? scannedBarcode : null}
-                    onSuccess={() => {
-                      setIsOpen(false)
-                      setAddRecordPath(null)
-                      setScannedBarcode(null)
-                      setBarcodeError(null)
-                      setRecordsVersion((version) => version + 1)
-                    }}
-                  />
-                </>
+                <RecordForm
+                  language={language}
+                  startWithDiscogsUrl={addRecordPath === 'discogsUrl'}
+                  onSuccess={handleRecordAdded}
+                />
               )}
             </DialogContent>
           </Dialog>
