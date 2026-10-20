@@ -602,6 +602,7 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
             showTopSaveButton={Boolean(selectedRelease)}
             onUploadOriginalImage={sourcePhoto ? () => uploadOriginalPhoto(sourcePhoto) : undefined}
             onSuccess={() => advanceRecord(true)}
+            onSkip={() => advanceRecord(false)}
           />
         </div>
         <div className="flex justify-end border-t pt-3">

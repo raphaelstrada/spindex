@@ -305,7 +305,8 @@ export const translations = {
       duplicateRecordUpdate: 'Update Existing',
       duplicateRecordCreateDuplicate: 'Create Duplicate',
       similarRecordExists: 'Similar record already in your collection',
-      skipRecord: 'Clear and skip',
+      skipRecord: 'Skip this record',
+      continueAnyway: 'Continue anyway',
     },
   },
   pt: {
@@ -612,7 +613,8 @@ export const translations = {
       duplicateRecordUpdate: 'Atualizar existente',
       duplicateRecordCreateDuplicate: 'Criar duplicado',
       similarRecordExists: 'Disco similar já existe na sua coleção',
-      skipRecord: 'Limpar e pular',
+      skipRecord: 'Pular este disco',
+      continueAnyway: 'Continuar mesmo assim',
     },
   },
 } as const

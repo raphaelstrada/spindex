@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { AlertCircle, ArrowRight, Disc3, Images, LoaderCircle, Search, X } from 'lucide-react'
+import { AlertCircle, ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { getCollectionOwner } from '@/lib/collection'
 import { countryRank, getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
@@ -118,7 +118,7 @@ function createFormSchema(language: Language) {
 type FormInput = z.input<ReturnType<typeof createFormSchema>>
 type FormValues = z.output<ReturnType<typeof createFormSchema>>
 
-export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, startWithDiscogsUrl = false, onUploadPicture, onUploadOriginalImage, onSuccess, onSaveAndNext }: {
+export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, startWithDiscogsUrl = false, onUploadPicture, onUploadOriginalImage, onSuccess, onSaveAndNext, onSkip }: {
   language: Language
   record?: VinylRecord
   initialValues?: Partial<VinylRecord>
@@ -129,6 +129,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   onUploadOriginalImage?: () => Promise<string>
   onSuccess?: (values: FormValues) => void
   onSaveAndNext?: (values: FormValues, addToCollection: boolean) => void
+  onSkip?: () => void
 }) {
   const t = translations[language].form
   const [discogsSearching, setDiscogsSearching] = useState(false)
@@ -150,7 +151,19 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false)
   const [existingDuplicate, setExistingDuplicate] = useState<VinylRecord | null>(null)
   const [isCheckingExisting, setIsCheckingExisting] = useState(false)
+  const [duplicateAcknowledged, setDuplicateAcknowledged] = useState(false)
   const duplicateCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function skipRecord() {
+    setDuplicateAcknowledged(true)
+    if (onSkip) {
+      onSkip()
+      return
+    }
+    form.setValue('artist', '')
+    form.setValue('title', '')
+    setExistingDuplicate(null)
+  }
   const form = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(createFormSchema(language)),
     defaultValues: {
@@ -342,9 +355,12 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSearchDiscogs])
 
+  const watchedArtist = form.watch('artist')
+  const watchedTitle = form.watch('title')
+
   useEffect(() => {
-    const artist = form.getValues('artist').trim()
-    const title = form.getValues('title').trim()
+    const artist = watchedArtist.trim()
+    const title = watchedTitle.trim()
 
     if (duplicateCheckTimeoutRef.current) {
       clearTimeout(duplicateCheckTimeoutRef.current)
@@ -355,7 +371,10 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       duplicateCheckTimeoutRef.current = setTimeout(async () => {
         try {
           const duplicate = await checkDuplicateRecord(artist, title)
-          setExistingDuplicate(duplicate)
+          setExistingDuplicate((current) => {
+            if (current?.id !== duplicate?.id) setDuplicateAcknowledged(false)
+            return duplicate
+          })
         } catch {
           setExistingDuplicate(null)
         } finally {
@@ -371,7 +390,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
         clearTimeout(duplicateCheckTimeoutRef.current)
       }
     }
-  }, [form.watch('artist'), form.watch('title')])
+  }, [watchedArtist, watchedTitle])
 
   async function selectDiscogsRelease(release: DiscogsRelease) {
     setSelectedDiscogsTitle(release.title)
@@ -517,13 +536,43 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const hasDiscogsFilters = discogsCountryFilter !== 'all' || discogsYearFilter !== 'all'
 
   return (
-    <Form {...form}>
+    <>
+      <Dialog open={existingDuplicate !== null && !record && !duplicateAcknowledged} onOpenChange={(open) => {
+        if (!open) setDuplicateAcknowledged(true)
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-600" aria-hidden="true" />
+              {t.similarRecordExists}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              {existingDuplicate?.artist} – {existingDuplicate?.title}
+              {existingDuplicate?.year_pressed && ` (${existingDuplicate.year_pressed}`}
+              {existingDuplicate?.country_pressed && `, ${existingDuplicate.country_pressed}`}
+              {existingDuplicate?.year_pressed && ')'}
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={skipRecord}>
+              {t.skipRecord}
+            </Button>
+            <Button type="button" onClick={() => setDuplicateAcknowledged(true)}>
+              {t.continueAnyway}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         {showTopSaveButton && (
           <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
             {record ? t.saveChanges : t.save}
           </Button>
         )}
+
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           {onUploadPicture && (
             <Button type="button" variant="default" onClick={onUploadPicture}>
@@ -599,37 +648,6 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
             <FormItem><FormLabel>{t.subGenre}</FormLabel><FormControl><Input placeholder={t.subGenrePlaceholder} {...field} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
-
-        {existingDuplicate && !record && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/30 dark:bg-amber-950/20">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden="true" />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
-                {t.similarRecordExists}
-              </p>
-              <p className="text-xs text-amber-800 dark:text-amber-300">
-                {existingDuplicate.artist} – {existingDuplicate.title}
-                {existingDuplicate.year_pressed && ` (${existingDuplicate.year_pressed}`}
-                {existingDuplicate.country_pressed && `, ${existingDuplicate.country_pressed}`}
-                {existingDuplicate.year_pressed && ')'}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 shrink-0 px-0"
-              onClick={() => {
-                form.setValue('artist', '')
-                form.setValue('title', '')
-                setExistingDuplicate(null)
-              }}
-              title={t.skipRecord}
-            >
-              <X className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          </div>
-        )}
 
         <div className="space-y-3">
           {selectedDiscogsTitle && (
@@ -1066,5 +1084,6 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
         </DialogContent>
       </Dialog>
     </Form>
+    </>
   )
 }
