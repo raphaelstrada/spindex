@@ -36,11 +36,13 @@ export function BarcodeRecordImport({
   barcode,
   onRescan,
   onSuccess,
+  onSkip,
 }: {
   language: Language
   barcode: string
   onRescan: () => void
   onSuccess: () => void
+  onSkip?: () => void
 }) {
   const app = translations[language].app
   const photo = translations[language].photoImport
@@ -123,6 +125,7 @@ export function BarcodeRecordImport({
             initialValues={initialValues}
             showTopSaveButton={Boolean(selectedRelease)}
             onSuccess={onSuccess}
+            onSkip={onSkip}
           />
         </div>
       )}

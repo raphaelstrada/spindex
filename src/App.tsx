@@ -46,11 +46,15 @@ export default function App() {
     window.localStorage.setItem('spindex-language', language)
   }, [language, t.app.title])
 
-  function handleRecordAdded() {
+  function closeAddRecordDialog() {
     setIsOpen(false)
     setAddRecordPath(null)
     setScannedBarcode(null)
     setBarcodeError(null)
+  }
+
+  function handleRecordAdded() {
+    closeAddRecordDialog()
     setRecordsVersion((version) => version + 1)
   }
 
@@ -179,7 +183,7 @@ export default function App() {
                   </button>
                 </div>
               ) : addRecordPath === 'catalogNumber' ? (
-                <CatalogNumberRecordImport language={language} onSuccess={handleRecordAdded} />
+                <CatalogNumberRecordImport language={language} onSuccess={handleRecordAdded} onSkip={closeAddRecordDialog} />
               ) : addRecordPath === 'barcode' && scannedBarcode ? (
                 <BarcodeRecordImport
                   language={language}
@@ -189,6 +193,7 @@ export default function App() {
                     setBarcodeError(null)
                   }}
                   onSuccess={handleRecordAdded}
+                  onSkip={closeAddRecordDialog}
                 />
               ) : addRecordPath === 'barcode' ? (
                 <div className="py-2">
@@ -211,6 +216,7 @@ export default function App() {
                   language={language}
                   startWithDiscogsUrl={addRecordPath === 'discogsUrl'}
                   onSuccess={handleRecordAdded}
+                  onSkip={closeAddRecordDialog}
                 />
               )}
             </DialogContent>

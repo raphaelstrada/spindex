@@ -11,9 +11,11 @@ import { translations, type Language } from '@/lib/i18n'
 export function CatalogNumberRecordImport({
   language,
   onSuccess,
+  onSkip,
 }: {
   language: Language
   onSuccess: () => void
+  onSkip?: () => void
 }) {
   const app = translations[language].app
   const photo = translations[language].photoImport
@@ -125,6 +127,7 @@ export function CatalogNumberRecordImport({
             initialValues={initialValues}
             showTopSaveButton={Boolean(selectedRelease)}
             onSuccess={onSuccess}
+            onSkip={onSkip}
           />
         </div>
       )}

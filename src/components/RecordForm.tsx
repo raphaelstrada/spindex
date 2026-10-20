@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { AlertCircle, ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
+import { AlertCircle, ArrowRight, Disc3, Hash, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { getCollectionOwner } from '@/lib/collection'
-import { countryRank, getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
+import { countryRank, getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsByCatalogNumber, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -141,8 +141,10 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const [discogsYearFilter, setDiscogsYearFilter] = useState('all')
   const [discogsPriceLoading, setDiscogsPriceLoading] = useState(false)
   const [discogsPriceLookupComplete, setDiscogsPriceLookupComplete] = useState(false)
-  const [showDiscogsUrl, setShowDiscogsUrl] = useState(startWithDiscogsUrl)
+  // Manual Discogs lookup next to the artist/title search: a release URL or a (fuzzy) catalog number.
+  const [manualDiscogsSearch, setManualDiscogsSearch] = useState<'url' | 'catalogNumber' | null>(startWithDiscogsUrl ? 'url' : null)
   const [discogsUrlInput, setDiscogsUrlInput] = useState('')
+  const [catalogNumberInput, setCatalogNumberInput] = useState('')
   const [selectedDiscogsTitle, setSelectedDiscogsTitle] = useState<string | null>(null)
   const [selectedDiscogsRelease, setSelectedDiscogsRelease] = useState<DiscogsRelease | null>(null)
   const [appliedDiscogsFields, setAppliedDiscogsFields] = useState<Set<string>>(new Set())
@@ -315,7 +317,8 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   async function handleDiscogsSearch(useFilters = false) {
     const artist = form.getValues('artist').trim()
     const title = form.getValues('title').trim()
-    const releaseUrl = showDiscogsUrl ? discogsUrlInput.trim() : ''
+    const releaseUrl = manualDiscogsSearch === 'url' ? discogsUrlInput.trim() : ''
+    const catalogNumber = manualDiscogsSearch === 'catalogNumber' ? catalogNumberInput.trim() : ''
     setDiscogsResults([])
     setDiscogsSearchError(null)
     setDiscogsHasSearched(false)
@@ -326,6 +329,23 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     if (!useFilters) {
       setDiscogsCountryFilter('all')
       setDiscogsYearFilter('all')
+    }
+
+    if (manualDiscogsSearch === 'catalogNumber') {
+      if (!/[\p{L}\p{N}]/u.test(catalogNumber)) {
+        setDiscogsSearchError(translations[language].app.catalogNumberInvalid)
+        return
+      }
+      setDiscogsSearching(true)
+      try {
+        setDiscogsResults(await searchDiscogsByCatalogNumber(catalogNumber))
+        setDiscogsHasSearched(true)
+      } catch (error) {
+        setDiscogsSearchError(error instanceof Error ? error.message : t.discogsSearchError)
+      } finally {
+        setDiscogsSearching(false)
+      }
+      return
     }
 
     if (!artist && !title && !releaseUrl) {
@@ -538,12 +558,16 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const discogsYears = [...new Set(discogsResults.map((release) => release.year).filter((year): year is number => year !== null))]
     .sort((left, right) => right - left)
   // Pressing-country priority: Canada, Brazil, US, Europe, others (see countryRank).
+  // Catalog-number results keep match quality (exact first, then closest) ahead of the country.
   const filteredDiscogsResults = discogsResults
     .filter((release) =>
       (discogsCountryFilter === 'all' || release.country === discogsCountryFilter)
       && (discogsYearFilter === 'all' || String(release.year) === discogsYearFilter),
     )
-    .sort((left, right) => countryRank(left.country) - countryRank(right.country))
+    .sort((left, right) =>
+      (left.matchTier ?? 0) - (right.matchTier ?? 0)
+      || (left.matchDistance ?? 0) - (right.matchDistance ?? 0)
+      || countryRank(left.country) - countryRank(right.country))
   const hasDiscogsFilters = discogsCountryFilter !== 'all' || discogsYearFilter !== 'all'
 
   return (
@@ -592,7 +616,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
               {translations[language].app.upload}
             </Button>
           )}
-          {showDiscogsUrl ? (
+          {manualDiscogsSearch === 'url' ? (
             <div id="discogs-url-field" className="min-w-0 flex-1">
               <div className="space-y-2">
                 <Label htmlFor="discogs-url-input">{t.discogsUrl}</Label>
@@ -605,16 +629,50 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
                 />
               </div>
             </div>
+          ) : manualDiscogsSearch === 'catalogNumber' ? (
+            <div id="discogs-catno-field" className="min-w-0 flex-1">
+              <div className="space-y-2">
+                <Label htmlFor="discogs-catno-input">{translations[language].app.catalogNumberLabel}</Label>
+                <Input
+                  id="discogs-catno-input"
+                  autoFocus
+                  autoComplete="off"
+                  className="font-mono"
+                  value={catalogNumberInput}
+                  onChange={(event) => setCatalogNumberInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    // Enter searches Discogs instead of submitting (saving) the record form.
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      void handleDiscogsSearch()
+                    }
+                  }}
+                  placeholder={translations[language].app.catalogNumberPlaceholder}
+                />
+              </div>
+            </div>
           ) : (
-            <Button
-              type="button"
-              variant="outline"
-              aria-expanded={false}
-              aria-controls="discogs-url-field"
-              onClick={() => setShowDiscogsUrl(true)}
-            >
-              {t.manualDiscogsUrl}
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                aria-expanded={false}
+                aria-controls="discogs-url-field"
+                onClick={() => setManualDiscogsSearch('url')}
+              >
+                {t.manualDiscogsUrl}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                aria-expanded={false}
+                aria-controls="discogs-catno-field"
+                onClick={() => setManualDiscogsSearch('catalogNumber')}
+              >
+                <Hash aria-hidden="true" />
+                {t.searchByCatalogNumber}
+              </Button>
+            </>
           )}
           <Button
             type="button"
@@ -630,13 +688,13 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
             )}
             {discogsSearching
               ? t.searchingDiscogs
-              : showDiscogsUrl
+              : manualDiscogsSearch
                 ? t.searchDiscogsByUrl
                 : t.searchDiscogs}
           </Button>
-          {showDiscogsUrl && (
-            <Button type="button" variant="ghost" onClick={() => setShowDiscogsUrl(false)}>
-              {t.hideDiscogsUrl}
+          {manualDiscogsSearch && (
+            <Button type="button" variant="ghost" onClick={() => setManualDiscogsSearch(null)}>
+              {manualDiscogsSearch === 'url' ? t.hideDiscogsUrl : t.hideCatalogNumber}
             </Button>
           )}
         </div>
@@ -701,7 +759,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
                   </SelectContent>
                 </Select>
               </div>
-              {hasDiscogsFilters && !(showDiscogsUrl && discogsUrlInput.trim()) && (
+              {hasDiscogsFilters && manualDiscogsSearch !== 'catalogNumber' && !(manualDiscogsSearch === 'url' && discogsUrlInput.trim()) && (
                 <Button
                   type="button"
                   variant="outline"
