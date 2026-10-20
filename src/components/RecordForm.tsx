@@ -600,37 +600,38 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
           )} />
         </div>
 
-        <div className="space-y-3">
-          {existingDuplicate && !record && (
-            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/30 dark:bg-amber-950/20">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden="true" />
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
-                  {t.similarRecordExists}
-                </p>
-                <p className="text-xs text-amber-800 dark:text-amber-300">
-                  {existingDuplicate.artist} – {existingDuplicate.title}
-                  {existingDuplicate.year_pressed && ` (${existingDuplicate.year_pressed}`}
-                  {existingDuplicate.country_pressed && `, ${existingDuplicate.country_pressed}`}
-                  {existingDuplicate.year_pressed && ')'}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 shrink-0 px-0"
-                onClick={() => {
-                  form.setValue('artist', '')
-                  form.setValue('title', '')
-                  setExistingDuplicate(null)
-                }}
-                title={t.skipRecord}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </Button>
+        {existingDuplicate && !record && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/30 dark:bg-amber-950/20">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
+                {t.similarRecordExists}
+              </p>
+              <p className="text-xs text-amber-800 dark:text-amber-300">
+                {existingDuplicate.artist} – {existingDuplicate.title}
+                {existingDuplicate.year_pressed && ` (${existingDuplicate.year_pressed}`}
+                {existingDuplicate.country_pressed && `, ${existingDuplicate.country_pressed}`}
+                {existingDuplicate.year_pressed && ')'}
+              </p>
             </div>
-          )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 shrink-0 px-0"
+              onClick={() => {
+                form.setValue('artist', '')
+                form.setValue('title', '')
+                setExistingDuplicate(null)
+              }}
+              title={t.skipRecord}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        )}
+
+        <div className="space-y-3">
           {selectedDiscogsTitle && (
             <p className="text-sm text-muted-foreground">
               {t.discogsReleaseSelected} {selectedDiscogsTitle}
