@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
+import { AlertCircle, ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { getCollectionOwner } from '@/lib/collection'
 import { countryRank, getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
@@ -23,6 +23,64 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
+
+function getLevenshteinDistance(a: string, b: string): number {
+  const matrix: number[][] = []
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i]
+  }
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j
+  }
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1]
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1,
+        )
+      }
+    }
+  }
+  return matrix[b.length][a.length]
+}
+
+async function calculateSimilarity(str1: string, str2: string): Promise<number> {
+  const a = str1.toLowerCase().trim()
+  const b = str2.toLowerCase().trim()
+  const longer = a.length > b.length ? a : b
+  const shorter = a.length > b.length ? b : a
+  if (longer.length === 0) return 1.0
+  const editDistance = getLevenshteinDistance(longer, shorter)
+  return (longer.length - editDistance) / longer.length
+}
+
+async function checkDuplicateRecord(artist: string, title: string): Promise<VinylRecord | null> {
+  const { data: records } = await supabase
+    .from('vinyl_records')
+    .select('*')
+    .eq('collection_owner', getCollectionOwner())
+
+  if (!records || records.length === 0) return null
+
+  let bestMatch: { record: VinylRecord; score: number } | null = null
+  const threshold = 0.75
+
+  for (const record of records) {
+    const artistSimilarity = await calculateSimilarity(artist, record.artist || '')
+    const titleSimilarity = await calculateSimilarity(title, record.title || '')
+    const combinedScore = (artistSimilarity + titleSimilarity) / 2
+
+    if (combinedScore >= threshold && (!bestMatch || combinedScore > bestMatch.score)) {
+      bestMatch = { record, score: combinedScore }
+    }
+  }
+
+  return bestMatch?.record || null
+}
 
 function createFormSchema(language: Language) {
   const t = translations[language].form
@@ -87,6 +145,9 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const [selectedDiscogsRelease, setSelectedDiscogsRelease] = useState<DiscogsRelease | null>(null)
   const [appliedDiscogsFields, setAppliedDiscogsFields] = useState<Set<string>>(new Set())
   const [addToDiscogsCollection, setAddToDiscogsCollection] = useState(true)
+  const [duplicateRecord, setDuplicateRecord] = useState<VinylRecord | null>(null)
+  const [pendingFormValues, setPendingFormValues] = useState<FormValues | null>(null)
+  const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false)
   const form = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(createFormSchema(language)),
     defaultValues: {
@@ -117,8 +178,25 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   })
 
   async function onSubmit(values: FormValues) {
-    // Whenever the record is associated with a Discogs release (via picker or URL),
-    // refresh the lowest price so it always reflects the associated release.
+    if (!record) {
+      setIsCheckingDuplicate(true)
+      try {
+        const duplicate = await checkDuplicateRecord(values.artist, values.title)
+        if (duplicate) {
+          setDuplicateRecord(duplicate)
+          setPendingFormValues(values)
+          setIsCheckingDuplicate(false)
+          return
+        }
+      } catch {
+        setIsCheckingDuplicate(false)
+      }
+    }
+
+    await proceedWithSave(values)
+  }
+
+  async function proceedWithSave(values: FormValues) {
     let discogsLowestPrice = values.discogs_lowest_price
     const associatedReleaseId = selectedDiscogsRelease?.id ?? getDiscogsReleaseId(values.discogs_link)
     if (associatedReleaseId) {
@@ -148,8 +226,6 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       discogs_lowest_price: discogsLowestPrice,
       ...(originalImageUrl ? { original_image_url: originalImageUrl } : {}),
     }
-    // A synced record that now points to a different Discogs release (or none) is no longer
-    // in sync with the Discogs collection: never keep showing it as synced.
     const releaseChanged = Boolean(record?.discogs_synced_at)
       && getDiscogsReleaseId(record?.discogs_link) !== getDiscogsReleaseId(valuesToSave.discogs_link)
     const databaseValues = {
@@ -165,7 +241,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     const { error } = record
       ? await supabase.from('vinyl_records').update(databaseValues).eq('id', record.id)
       : await supabase.from('vinyl_records').insert([{ ...databaseValues, collection_owner: getCollectionOwner() }])
-    
+
     if (error) {
       console.error('Failed to insert record:', error.message)
       alert(`${t.databaseError} ${error.message}`)
@@ -178,6 +254,42 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     }
 
     onSuccess?.(valuesToSave)
+  }
+
+  async function handleUpdateExisting() {
+    if (!duplicateRecord || !pendingFormValues) return
+
+    const databaseValues = {
+      ...pendingFormValues,
+      record_type: pendingFormValues.record_type || null,
+      record_size: pendingFormValues.record_size || null,
+      media_condition: pendingFormValues.media_condition || null,
+      sleeve_condition: pendingFormValues.sleeve_condition || null,
+      marketplace_price: pendingFormValues.marketplace_price ?? null,
+      marketplace_currency: pendingFormValues.marketplace_currency || null,
+    }
+
+    const { error } = await supabase
+      .from('vinyl_records')
+      .update(databaseValues)
+      .eq('id', duplicateRecord.id)
+
+    if (error) {
+      console.error('Failed to update record:', error.message)
+      alert(`${t.databaseError} ${error.message}`)
+      return
+    }
+
+    setDuplicateRecord(null)
+    setPendingFormValues(null)
+    onSuccess?.(pendingFormValues)
+  }
+
+  async function handleCreateDuplicate() {
+    if (!pendingFormValues) return
+    setDuplicateRecord(null)
+    setPendingFormValues(null)
+    await proceedWithSave(pendingFormValues)
   }
 
   async function handleDiscogsSearch(useFilters = false) {
@@ -796,6 +908,95 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
               </Button>
             )}
             <Button type="button" variant="outline" onClick={() => setSelectedDiscogsRelease(null)}>{t.closeReview}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={duplicateRecord !== null} onOpenChange={(open) => {
+        if (!open) {
+          setDuplicateRecord(null)
+          setPendingFormValues(null)
+        }
+      }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-600" aria-hidden="true" />
+              {t.duplicateRecordFound}
+            </DialogTitle>
+            <DialogDescription>
+              {t.duplicateRecordDescription}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg border bg-card p-4">
+              <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t.duplicateRecordNew}</h3>
+              <div className="space-y-2">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t.artist.replace(' *', '')}</p>
+                  <p className="text-sm font-medium">{pendingFormValues?.artist || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t.albumTitle.replace(' *', '')}</p>
+                  <p className="text-sm font-medium">{pendingFormValues?.title || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t.yearPressed}</p>
+                  <p className="text-sm">{pendingFormValues?.year_pressed || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t.country}</p>
+                  <p className="text-sm">{pendingFormValues?.country_pressed || '-'}</p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50/30 p-4 dark:border-amber-900/30 dark:bg-amber-950/20">
+              <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t.duplicateRecordExisting}</h3>
+              <div className="space-y-2">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t.artist.replace(' *', '')}</p>
+                  <p className="text-sm font-medium">{duplicateRecord?.artist || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t.albumTitle.replace(' *', '')}</p>
+                  <p className="text-sm font-medium">{duplicateRecord?.title || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t.yearPressed}</p>
+                  <p className="text-sm">{duplicateRecord?.year_pressed || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t.country}</p>
+                  <p className="text-sm">{duplicateRecord?.country_pressed || '-'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDuplicateRecord(null)
+                setPendingFormValues(null)
+              }}
+            >
+              {translations[language].table.cancel}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCreateDuplicate}
+              disabled={isCheckingDuplicate}
+            >
+              {t.duplicateRecordCreateDuplicate}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleUpdateExisting}
+              disabled={isCheckingDuplicate}
+            >
+              {t.duplicateRecordUpdate}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

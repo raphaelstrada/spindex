@@ -1,0 +1,67 @@
+# Dependencies
+node_modules/
+venv/
+env/
+.venv/
+*.egg-info/
+__pycache__/
+
+# Build & dist
+dist/
+build/
+.next/
+out/
+.turbo/
+tsconfig.tsbuildinfo
+
+# Lockfiles
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+poetry.lock
+Gemfile.lock
+
+# Git
+.git/
+.gitignore
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# IDE & editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-workspace
+
+# Testing & coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# OS & temp files
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+*.tmp
+
+# GitHub & CI
+.github/
+.gitlab-ci.yml
+.circleci/
+.travis.yml
+
+# Static assets (already readable in src/assets)
+public/
+
+# Database & migration artifacts
+*.db
+*.sqlite
+*.log
