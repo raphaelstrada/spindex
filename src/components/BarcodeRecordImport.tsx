@@ -6,7 +6,7 @@ import { searchDiscogsByBarcode, type DiscogsRelease } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 
-function valuesFromRelease(release: DiscogsRelease, artistAndTitleOnly: boolean): Partial<VinylRecord> {
+export function valuesFromRelease(release: DiscogsRelease, artistAndTitleOnly: boolean): Partial<VinylRecord> {
   if (artistAndTitleOnly) {
     return { artist: release.artist, title: release.releaseTitle }
   }
@@ -17,6 +17,7 @@ function valuesFromRelease(release: DiscogsRelease, artistAndTitleOnly: boolean)
     year_pressed: release.year ?? undefined,
     country_pressed: release.country ?? '',
     record_label: release.label[0] ?? '',
+    catalog_number: release.catalogNumber ?? '',
     genre: release.genre ?? '',
     sub_genre: release.subGenre ?? '',
     record_type: release.recordType ?? '',

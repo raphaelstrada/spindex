@@ -145,6 +145,7 @@ export function DiscogsCandidatePicker({
                     <img src={release.thumbnail} alt="" className="h-14 w-14 shrink-0 rounded-sm object-cover" loading="lazy" />
                     <span className="min-w-0 flex-1">
                       <span className="block line-clamp-2 text-sm font-medium">{release.title}</span>
+                      {release.catalogNumber && <span className="mt-1 inline-block rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs font-semibold text-primary">{release.catalogNumber}</span>}
                       <span className="mt-1 block text-xs text-muted-foreground">
                         {[release.year, release.country, release.format.join(', '), release.label[0]].filter(Boolean).join(' · ')}
                       </span>

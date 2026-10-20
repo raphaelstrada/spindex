@@ -20,6 +20,10 @@ export type DiscogsRelease = {
   lowestPrice?: number | null
   priceCurrency?: string
   listingsCount?: number | null
+  /** Catalog-number search only: 0 exact, 1 prefix, 2 contains, 3 approximate (typo). */
+  matchTier?: number
+  /** Catalog-number search only: edit distance to the query (lower is closer). */
+  matchDistance?: number
 }
 
 export type DiscogsPriceStats = {
@@ -138,6 +142,27 @@ export async function searchDiscogsByBarcode(barcode: string): Promise<DiscogsRe
     if (data?.results?.length) return sortReleasesByCountryPriority(data.results)
   }
   return []
+}
+
+/**
+ * Fuzzy catalog-number search (typos, transpositions, partial values).
+ * Match quality comes first (exact, prefix, contains, typo), then closeness to what was typed,
+ * then the usual pressing-country priority. All exact matches are equally close, so for them the
+ * country decides. Every match is returned; the number of Discogs requests is fixed by the edge function.
+ */
+export async function searchDiscogsByCatalogNumber(catalogNumber: string): Promise<DiscogsRelease[]> {
+  const { data, error } = await supabase.functions.invoke<{ results: DiscogsRelease[] }>(
+    'discogs-search',
+    { body: { catno: catalogNumber.trim() } },
+  )
+
+  if (error) throw await extractFunctionError(error, 'discogs-search')
+  // Stable sort: inside the same tier and country group, the edge function's ranking is kept.
+  return [...(data?.results ?? [])]
+    .sort((left, right) =>
+      (left.matchTier ?? 0) - (right.matchTier ?? 0)
+      || (left.matchDistance ?? 0) - (right.matchDistance ?? 0)
+      || countryRank(left.country) - countryRank(right.country))
 }
 
 export async function getDiscogsLowestPrice(releaseId: number): Promise<DiscogsPriceStats> {

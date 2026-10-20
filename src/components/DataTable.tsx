@@ -60,11 +60,11 @@ import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 
 const visibleRecordFields = new Set([
-  'image_url', 'original_image_url', 'artist', 'title', 'year_pressed', 'genre',
+  'image_url', 'original_image_url', 'artist', 'title', 'year_pressed', 'catalog_number', 'country_pressed',
   'discogs_lowest_price', 'marketplace_price', 'marketplace_currency',
 ])
 const recordFilterFields: string[] = [
-  'id', 'artist', 'title', 'year_pressed', 'genre', 'image_url', 'original_image_url', 'source_url',
+  'id', 'artist', 'title', 'year_pressed', 'catalog_number', 'genre', 'image_url', 'original_image_url', 'source_url',
   'record_label', 'sub_genre', 'record_type', 'record_size', 'country_pressed',
   'media_condition', 'sleeve_condition', 'is_original', 'is_special_edition',
   'special_edition_reason', 'sell_possibility', 'sold', 'discogs_lowest_price', 'marketplace_price', 'marketplace_currency',
@@ -74,6 +74,7 @@ const dropdownFilterFields = new Set([
   'artist', 'title', 'year_pressed', 'genre', 'record_label',
   'sub_genre', 'country_pressed', 'media_condition', 'sleeve_condition',
 ])
+const compactColumns = new Set(['discogs_lowest_price', 'marketplace_price', 'price_on_discogs'])
 const autocompleteFilterFields = new Set(['artist', 'title'])
 
 function searchableValue(value: unknown, language: Language) {
@@ -83,7 +84,7 @@ function searchableValue(value: unknown, language: Language) {
   return String(value)
 }
 
-const globalSearchFields = ['artist', 'title', 'record_label', 'genre', 'sub_genre', 'country_pressed', 'year_pressed'] as const
+const globalSearchFields = ['artist', 'title', 'catalog_number', 'record_label', 'genre', 'sub_genre', 'country_pressed', 'year_pressed'] as const
 
 function matchesGlobalSearch(record: VinylRecord, query: string) {
   return globalSearchFields.some((field) => {
@@ -113,7 +114,8 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const [data, setData] = useState<VinylRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'artist', desc: false }])
+  // Default view: most recently added records first.
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'created_at', desc: true }])
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const [globalSearch, setGlobalSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -217,9 +219,9 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         for (;;) {
           const { data: records, error } = await supabase
             .from('vinyl_records')
-            .select('id, collection_owner, artist, title, year_pressed, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, price_on_discogs, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url')
+            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, price_on_discogs, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url, created_at')
             .ilike('collection_owner', getCollectionOwner())
-            .order('artist', { ascending: true })
+            .order('created_at', { ascending: false })
             .order('id', { ascending: true })
             .range(from, from + pageSize - 1)
 
@@ -815,10 +817,17 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         )
       },
     },
+    // Hidden column: only used as the default sort (date the record was added to Spindex).
+    { accessorKey: 'created_at', header: t.detailLabels.created_at },
     { accessorKey: 'artist', header: t.artist },
     { accessorKey: 'title', header: t.title },
     { accessorKey: 'year_pressed', header: t.year },
-    { accessorKey: 'genre', header: t.genre },
+    {
+      accessorKey: 'catalog_number',
+      header: 'Cat#',
+      cell: ({ row }) => <span className="whitespace-nowrap font-mono text-xs font-semibold">{row.original.catalog_number || '-'}</span>,
+    },
+    { accessorKey: 'country_pressed', header: t.country },
     {
       id: 'selectUnpriced',
       header: () => (
@@ -1109,7 +1118,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const table = useReactTable({
     data: filteredData,
     columns,
-    state: { sorting, expanded, pagination },
+    state: { sorting, expanded, pagination, columnVisibility: { created_at: false } },
     onSortingChange: setSorting,
     onExpandedChange: setExpanded,
     onPaginationChange: setPagination,
@@ -1350,14 +1359,14 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id} className={`h-10 px-3 text-xs font-semibold uppercase tracking-normal ${header.column.id === 'actions' ? 'text-right' : ''}`}>
+                  <TableHead key={header.id} className={`h-10 px-3 text-xs font-semibold uppercase tracking-normal ${header.column.id === 'actions' ? 'text-right' : ''} ${compactColumns.has(header.column.id) ? 'w-px' : ''}`}>
                     {header.isPlaceholder ? null : !header.column.getCanSort() ? (
                       flexRender(header.column.columnDef.header, header.getContext())
                     ) : (
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="-ml-3 h-8 px-2 font-medium"
+                        className={`-ml-3 px-2 font-medium ${compactColumns.has(header.column.id) ? 'h-auto min-h-8 w-[5.5rem] whitespace-normal py-1 text-left leading-tight' : 'h-8'}`}
                         onClick={header.column.getToggleSortingHandler()}
                         aria-label={`${String(header.column.columnDef.header)}: ${
                           header.column.getIsSorted() === 'asc'
@@ -1405,7 +1414,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
                     title={missingDiscogsLink ? t.noDiscogsLinkRow : undefined}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className="px-3 py-2.5 align-middle">
+                      <TableCell key={cell.id} className={`px-3 py-2.5 align-middle ${compactColumns.has(cell.column.id) ? 'whitespace-nowrap' : ''}`}>
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}
@@ -1432,6 +1441,8 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
                                     >
                                       <img src={value} alt={t.originalPhoto} className="max-h-36 max-w-36 rounded-sm border object-contain" loading="lazy" />
                                     </button>
+                                  ) : key === 'created_at' && typeof value === 'string' ? (
+                                    new Date(value).toLocaleString(language === 'pt' ? 'pt-BR' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })
                                   ) : displayDetailValue(value)}
                                 </dd>
                               </div>

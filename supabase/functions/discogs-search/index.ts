@@ -49,6 +49,132 @@ type DiscogsReleaseDetails = {
 // is only a safety net against runaway searches and the edge function time limit.
 const MAX_SEARCH_PAGES = 20
 
+// Extra Discogs requests for the typo round (Discogs allows 60 authenticated requests per minute).
+const MAX_TYPO_QUERIES = 8
+
+/** Lowercase, alphanumerics only: "SMAS-3375", "smas 3375" and "SMAS3375" compare equal. */
+function normalizeCatno(value: string) {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+/**
+ * Damerau-Levenshtein distance (optimal string alignment): insertions, deletions,
+ * substitutions and adjacent transpositions each cost 1. "Raphal" -> "Raphael" = 1.
+ */
+function editDistance(left: string, right: string) {
+  const rows = Array.from({ length: left.length + 1 }, (_, i) => [i, ...Array<number>(right.length).fill(0)])
+  for (let j = 1; j <= right.length; j++) rows[0][j] = j
+  for (let i = 1; i <= left.length; i++) {
+    for (let j = 1; j <= right.length; j++) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1
+      rows[i][j] = Math.min(rows[i - 1][j] + 1, rows[i][j - 1] + 1, rows[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && left[i - 1] === right[j - 2] && left[i - 2] === right[j - 1]) {
+        rows[i][j] = Math.min(rows[i][j], rows[i - 2][j - 2] + 1)
+      }
+    }
+  }
+  return rows[left.length][right.length]
+}
+
+/**
+ * Ranks a Discogs catalog number against the query. Lower is better; null means no match.
+ * Tiers: exact (0) < prefix (1) < contains (2) < approximate/typo (3). Inside a tier the
+ * edit distance decides, so closer spellings come first.
+ */
+function catnoMatchRank(query: string, candidate: string | undefined): [number, number] | null {
+  if (!candidate) return null
+  const normalizedQuery = normalizeCatno(query)
+  // A release can carry several catalog numbers ("ABC-1, ABC-1A"): the best one wins.
+  const values = [candidate, ...candidate.split(/\s*[,;/]\s*/)].map(normalizeCatno).filter(Boolean)
+  let best: [number, number] | null = null
+
+  for (const value of values) {
+    const distance = editDistance(normalizedQuery, value)
+    let tier: number | null = null
+    if (value === normalizedQuery) tier = 0
+    // Partial match: what was typed is the start of / part of the catalog number. A catalog number
+    // shorter than the query ("3375" for "SMSA-3375") is not a partial match; edit distance decides.
+    else if (value.startsWith(normalizedQuery)) tier = 1
+    else if (value.includes(normalizedQuery)) tier = 2
+    else {
+      // Allow roughly one typo per three characters (at least one).
+      const allowed = Math.max(1, Math.round(Math.max(value.length, normalizedQuery.length) / 3))
+      if (distance <= allowed) tier = 3
+    }
+    // Very short queries ("1") would partially match almost everything.
+    if ((tier === 1 || tier === 2) && normalizedQuery.length < 3) tier = null
+    if (tier !== null && (!best || tier < best[0] || (tier === best[0] && distance < best[1]))) {
+      best = [tier, distance]
+    }
+  }
+  return best
+}
+
+/**
+ * Discogs' own catno search is token based and does not tolerate typos, so several spellings of
+ * the query are sent and the merged results are ranked locally with catnoMatchRank.
+ */
+function catnoQueryVariants(catno: string) {
+  const tokens = catno.split(/[^\p{L}\p{N}]+|(?<=\p{L})(?=\p{N})|(?<=\p{N})(?=\p{L})/u).filter(Boolean)
+  // The numeric part ("3375" in "SMAS-3375") is usually the most selective single token.
+  const longestToken = [...tokens].sort((left, right) =>
+    Number(/\d/.test(right)) - Number(/\d/.test(left)) || right.length - left.length)[0]
+  const variants = [catno, tokens.join(' '), tokens.join(''), tokens.join('-')]
+  if (tokens.length > 1 && longestToken && longestToken.length >= 3) variants.push(longestToken)
+  return [...new Set(variants.filter(Boolean))]
+}
+
+/**
+ * Typo variants for a second search round: every adjacent transposition of the query, keeping its
+ * separators ("SMSA-3375" -> "MSSA-3375", "SSMA-3375", "SMAS-3375", ...). Only used when the first
+ * round found no exact match, to stay well under the Discogs rate limit.
+ */
+function transpositionVariants(catno: string, limit: number) {
+  const characters = [...catno]
+  const variants: string[] = []
+  for (let i = 0; i < characters.length - 1 && variants.length < limit; i++) {
+    const [left, right] = [characters[i], characters[i + 1]]
+    if (left === right || !/[\p{L}\p{N}]/u.test(left) || !/[\p{L}\p{N}]/u.test(right)) continue
+    const swapped = [...characters]
+    swapped[i] = right
+    swapped[i + 1] = left
+    variants.push(swapped.join(''))
+  }
+  return variants
+}
+
+function toRelease(release: DiscogsResult, fallbackArtist: string) {
+  const separatorIndex = release.title.lastIndexOf(' - ')
+  const releaseArtist = separatorIndex >= 0
+    ? release.title.slice(0, separatorIndex).trim()
+    : fallbackArtist
+  const releaseTitle = separatorIndex >= 0
+    ? release.title.slice(separatorIndex + 3).trim()
+    : release.title
+  const format = release.format ?? []
+  const recordType = format.find((item) => ['LP', 'EP', 'Single', 'Box Set'].includes(item)) ?? null
+  const recordSize = format.find((item) => /^\d{1,2}["″]$/.test(item)) ?? null
+
+  return {
+    id: release.id,
+    title: release.title,
+    artist: releaseArtist,
+    releaseTitle,
+    year: release.year && Number.isFinite(Number(release.year)) ? Number(release.year) : null,
+    country: release.country ?? null,
+    format,
+    recordType,
+    recordSize,
+    label: release.label ?? [],
+    genre: release.genre?.[0] ?? null,
+    subGenre: release.style?.[0] ?? null,
+    catalogNumber: release.catno ?? null,
+    coverImage: release.cover_image || release.thumb!,
+    thumbnail: release.thumb || release.cover_image!,
+    url: new URL(release.uri || `/release/${release.id}`, 'https://www.discogs.com').toString(),
+  }
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -75,6 +201,7 @@ Deno.serve(async (request) => {
     const year = typeof body.year === 'number' || typeof body.year === 'string'
       ? String(body.year).trim()
       : ''
+    const catno = typeof body.catno === 'string' ? body.catno.trim() : ''
     const barcode = typeof body.barcode === 'string' || typeof body.barcode === 'number'
       ? String(body.barcode).replace(/\D/g, '')
       : ''
@@ -83,7 +210,11 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: 'Enter a valid barcode (8 to 14 digits).' }, 400)
     }
 
-    if ((priceReleaseId === null && !artist && !title && !releaseUrl && !barcode) || (priceReleaseId !== null && (!Number.isSafeInteger(priceReleaseId) || priceReleaseId <= 0)) || artist.length > 200 || title.length > 200 || releaseUrl.length > 500 || country.length > 100 || (year && !/^\d{4}$/.test(year))) {
+    if (body.catno !== undefined && (!normalizeCatno(catno) || catno.length > 50)) {
+      return jsonResponse({ error: 'Enter a valid catalog number.' }, 400)
+    }
+
+    if ((priceReleaseId === null && !artist && !title && !releaseUrl && !barcode && !catno) || (priceReleaseId !== null && (!Number.isSafeInteger(priceReleaseId) || priceReleaseId <= 0)) || artist.length > 200 || title.length > 200 || releaseUrl.length > 500 || country.length > 100 || (year && !/^\d{4}$/.test(year))) {
       return jsonResponse({ error: 'Provide an artist, an album title, or both.' }, 400)
     }
 
@@ -190,6 +321,55 @@ Deno.serve(async (request) => {
       })
     }
 
+    if (catno) {
+      const searchVariant = async (param: 'catno' | 'q', value: string) => {
+        const url = new URL('https://api.discogs.com/database/search')
+        url.searchParams.set('type', 'release')
+        url.searchParams.set('format', 'Vinyl')
+        url.searchParams.set(param, value)
+        url.searchParams.set('per_page', '100')
+        const response = await fetch(url, { headers: discogsHeaders })
+        if (!response.ok) {
+          await response.body?.cancel()
+          return { status: response.status, results: [] as DiscogsResult[] }
+        }
+        const payload = await response.json()
+        return { status: response.status, results: (payload.results as DiscogsResult[] | undefined) ?? [] }
+      }
+
+      const responses = await Promise.all([
+        ...catnoQueryVariants(catno).map((variant) => searchVariant('catno', variant)),
+        searchVariant('q', catno),
+      ])
+
+      const hasExactMatch = responses.some((response) =>
+        response.results.some((release) => catnoMatchRank(catno, release.catno)?.[0] === 0))
+      if (!hasExactMatch) {
+        responses.push(...await Promise.all(
+          transpositionVariants(catno, MAX_TYPO_QUERIES).map((variant) => searchVariant('catno', variant)),
+        ))
+      }
+
+      if (responses.every((response) => response.status !== 200)) {
+        const status = responses[0].status
+        if (status === 401 || status === 403) {
+          return jsonResponse({ error: 'Discogs rejected the configured credentials. Check the Supabase function secrets.' }, 502)
+        }
+        return jsonResponse({ error: `Discogs returned HTTP ${status}.` }, status)
+      }
+
+      const ranked = [...new Map(responses.flatMap((response) => response.results).map((release) => [release.id, release])).values()]
+        .filter((release) => release.cover_image || release.thumb)
+        .map((release, order) => ({ release, order, rank: catnoMatchRank(catno, release.catno) }))
+        .filter((item): item is typeof item & { rank: [number, number] } => item.rank !== null)
+        // Exact first, then prefix, contains and typo matches; Discogs relevance breaks ties.
+        .sort((left, right) => left.rank[0] - right.rank[0] || left.rank[1] - right.rank[1] || left.order - right.order)
+
+      return jsonResponse({
+        results: ranked.map(({ release, rank }) => ({ ...toRelease(release, ''), matchTier: rank[0], matchDistance: rank[1] })),
+      })
+    }
+
     const searchUrl = new URL('https://api.discogs.com/database/search')
     searchUrl.searchParams.set('type', 'release')
     if (artist) searchUrl.searchParams.set('artist', artist)
@@ -233,37 +413,7 @@ Deno.serve(async (request) => {
 
     const results = [...new Map(allReleases.map((release) => [release.id, release])).values()]
       .filter((release) => release.cover_image || release.thumb)
-      .map((release) => {
-        const separatorIndex = release.title.lastIndexOf(' - ')
-        const releaseArtist = separatorIndex >= 0
-          ? release.title.slice(0, separatorIndex).trim()
-          : artist
-        const releaseTitle = separatorIndex >= 0
-          ? release.title.slice(separatorIndex + 3).trim()
-          : release.title
-        const format = release.format ?? []
-        const recordType = format.find((item) => ['LP', 'EP', 'Single', 'Box Set'].includes(item)) ?? null
-        const recordSize = format.find((item) => /^\d{1,2}["″]$/.test(item)) ?? null
-
-        return {
-          id: release.id,
-          title: release.title,
-          artist: releaseArtist,
-          releaseTitle,
-          year: release.year && Number.isFinite(Number(release.year)) ? Number(release.year) : null,
-          country: release.country ?? null,
-          format,
-          recordType,
-          recordSize,
-          label: release.label ?? [],
-          genre: release.genre?.[0] ?? null,
-          subGenre: release.style?.[0] ?? null,
-          catalogNumber: release.catno ?? null,
-          coverImage: release.cover_image || release.thumb!,
-          thumbnail: release.thumb || release.cover_image!,
-          url: new URL(release.uri || `/release/${release.id}`, 'https://www.discogs.com').toString(),
-        }
-      })
+      .map((release) => toRelease(release, artist))
 
     return jsonResponse({ results })
   } catch (error) {

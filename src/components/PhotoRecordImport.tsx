@@ -146,6 +146,7 @@ function releaseFormValues(release: DiscogsRelease | undefined, detected: Detect
     year_pressed: release.year ?? undefined,
     country_pressed: release.country ?? '',
     record_label: release.label[0] ?? '',
+    catalog_number: release.catalogNumber ?? '',
     genre: release.genre ?? '',
     sub_genre: release.subGenre ?? '',
     record_type: release.recordType ?? '',

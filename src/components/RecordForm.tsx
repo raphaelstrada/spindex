@@ -95,6 +95,7 @@ function createFormSchema(language: Language) {
     record_size: z.string().optional(),
     year_pressed: z.coerce.number().int().optional(),
     country_pressed: z.string().optional(),
+    catalog_number: z.string().optional(),
     media_condition: z.string().optional(),
     sleeve_condition: z.string().optional(),
     is_original: z.boolean().default(true),
@@ -176,6 +177,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       record_size: record?.record_size ?? initialValues?.record_size ?? '',
       year_pressed: record?.year_pressed ?? initialValues?.year_pressed ?? undefined,
       country_pressed: record?.country_pressed ?? initialValues?.country_pressed ?? '',
+      catalog_number: record?.catalog_number ?? initialValues?.catalog_number ?? '',
       media_condition: record?.media_condition ?? initialValues?.media_condition ?? '',
       sleeve_condition: record?.sleeve_condition ?? initialValues?.sleeve_condition ?? '',
       is_original: record?.is_original ?? initialValues?.is_original ?? true,
@@ -248,6 +250,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       ...valuesToSave,
       record_type: valuesToSave.record_type || null,
       record_size: valuesToSave.record_size || null,
+      catalog_number: valuesToSave.catalog_number || null,
       media_condition: valuesToSave.media_condition || null,
       sleeve_condition: valuesToSave.sleeve_condition || null,
       marketplace_price: valuesToSave.marketplace_price ?? null,
@@ -279,6 +282,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       ...pendingFormValues,
       record_type: pendingFormValues.record_type || null,
       record_size: pendingFormValues.record_size || null,
+      catalog_number: pendingFormValues.catalog_number || null,
       media_condition: pendingFormValues.media_condition || null,
       sleeve_condition: pendingFormValues.sleeve_condition || null,
       marketplace_price: pendingFormValues.marketplace_price ?? null,
@@ -447,6 +451,13 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       apply: () => form.setValue('country_pressed', selectedDiscogsRelease.country ?? '', { shouldDirty: true, shouldValidate: true }),
     },
     {
+      key: 'catalog_number',
+      label: 'Cat#',
+      currentValue: form.getValues('catalog_number'),
+      suggestedValue: selectedDiscogsRelease.catalogNumber,
+      apply: () => form.setValue('catalog_number', selectedDiscogsRelease.catalogNumber ?? '', { shouldDirty: true, shouldValidate: true }),
+    },
+    {
       key: 'record_label',
       label: t.recordLabel,
       currentValue: form.getValues('record_label'),
@@ -554,6 +565,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
               {existingDuplicate?.country_pressed && `, ${existingDuplicate.country_pressed}`}
               {existingDuplicate?.year_pressed && ')'}
             </p>
+            {existingDuplicate?.catalog_number && <p className="font-mono text-sm font-semibold">Cat# {existingDuplicate.catalog_number}</p>}
           </div>
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={skipRecord}>
@@ -725,6 +737,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
                     />
                     <span className="min-w-0">
                       <span className="block line-clamp-2 text-sm font-medium">{release.title}</span>
+                      {release.catalogNumber && <span className="mt-1 inline-block rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs font-semibold text-primary">{release.catalogNumber}</span>}
                       <span className="mt-1 block text-xs text-muted-foreground">
                         {[release.year, release.country, release.format.join(', '), release.label[0]]
                           .filter(Boolean)
@@ -774,6 +787,9 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
           )} />
           <FormField control={form.control} name="country_pressed" render={({ field }) => (
             <FormItem><FormLabel>{t.country}</FormLabel><FormControl><Input placeholder={t.countryPlaceholder} {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+          <FormField control={form.control} name="catalog_number" render={({ field }) => (
+            <FormItem><FormLabel>Cat#</FormLabel><FormControl><Input placeholder="SMAS-3375" className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
 
@@ -1023,6 +1039,10 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
                   <p className="text-sm font-medium">{pendingFormValues?.title || '-'}</p>
                 </div>
                 <div>
+                  <p className="text-xs font-medium text-muted-foreground">Cat#</p>
+                  <p className="font-mono text-sm font-semibold">{pendingFormValues?.catalog_number || '-'}</p>
+                </div>
+                <div>
                   <p className="text-xs font-medium text-muted-foreground">{t.yearPressed}</p>
                   <p className="text-sm">{pendingFormValues?.year_pressed || '-'}</p>
                 </div>
@@ -1042,6 +1062,10 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
                 <div>
                   <p className="text-xs font-medium text-muted-foreground">{t.albumTitle.replace(' *', '')}</p>
                   <p className="text-sm font-medium">{duplicateRecord?.title || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Cat#</p>
+                  <p className="font-mono text-sm font-semibold">{duplicateRecord?.catalog_number || '-'}</p>
                 </div>
                 <div>
                   <p className="text-xs font-medium text-muted-foreground">{t.yearPressed}</p>

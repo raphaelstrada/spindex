@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Barcode, Disc3, Images, Moon, PenLine, Sun } from 'lucide-react'
+import { Barcode, Disc3, Hash, Images, Moon, PenLine, Sun } from 'lucide-react'
 import { RecordForm } from '@/components/RecordForm'
 import { PhotoRecordImport } from '@/components/PhotoRecordImport'
 import { BarcodeScanner } from '@/components/BarcodeScanner'
 import { BarcodeRecordImport } from '@/components/BarcodeRecordImport'
+import { CatalogNumberRecordImport } from '@/components/CatalogNumberRecordImport'
 import { DataTable } from '@/components/DataTable'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -17,7 +18,7 @@ import {
 import { translations, type Language } from '@/lib/i18n'
 import { Logo } from '@/components/Logo'
 
-type AddRecordPath = 'picture' | 'discogsUrl' | 'manual' | 'barcode' | null
+type AddRecordPath = 'picture' | 'catalogNumber' | 'discogsUrl' | 'manual' | 'barcode' | null
 
 export default function App() {
   const [isOpen, setIsOpen] = useState(false)
@@ -135,6 +136,17 @@ export default function App() {
                   <button
                     type="button"
                     className="flex items-center gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setAddRecordPath('catalogNumber')}
+                  >
+                    <Hash aria-hidden="true" className="h-6 w-6 shrink-0 text-muted-foreground" />
+                    <span>
+                      <span className="block font-medium">{t.app.addRecordPathCatalogNumber}</span>
+                      <span className="mt-0.5 block text-sm text-muted-foreground">{t.app.addRecordPathCatalogNumberHint}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex items-center gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => setAddRecordPath('discogsUrl')}
                   >
                     <Disc3 aria-hidden="true" className="h-6 w-6 shrink-0 text-muted-foreground" />
@@ -166,6 +178,8 @@ export default function App() {
                     </span>
                   </button>
                 </div>
+              ) : addRecordPath === 'catalogNumber' ? (
+                <CatalogNumberRecordImport language={language} onSuccess={handleRecordAdded} />
               ) : addRecordPath === 'barcode' && scannedBarcode ? (
                 <BarcodeRecordImport
                   language={language}
