@@ -33,6 +33,47 @@ export type DiscogsSearchFilters = {
   year?: number
 }
 
+const EUROPEAN_COUNTRIES = new Set([
+  'uk', 'united kingdom', 'england', 'scotland', 'wales', 'northern ireland', 'ireland', 'germany',
+  'east germany', 'west germany', 'france', 'italy', 'spain', 'portugal', 'netherlands', 'belgium',
+  'luxembourg', 'switzerland', 'austria', 'sweden', 'norway', 'denmark', 'finland', 'iceland', 'poland',
+  'czech republic', 'czech', 'czechoslovakia', 'slovakia', 'hungary', 'romania', 'bulgaria', 'greece',
+  'yugoslavia', 'serbia', 'croatia', 'slovenia', 'bosnia', 'herzegovina', 'montenegro', 'macedonia',
+  'north macedonia', 'albania', 'estonia', 'latvia', 'lithuania', 'ukraine', 'belarus', 'moldova', 'malta',
+  'cyprus', 'monaco', 'andorra', 'liechtenstein', 'san marino', 'scandinavia', 'benelux', 'faroe islands',
+])
+
+/**
+ * Pressing-country priority: Canada, Brazil, US, Europe, everything else, unknown last.
+ * Discogs also uses combined values such as "UK & Europe" or "US & Canada": the best part wins.
+ */
+export function countryRank(country: string | null | undefined): number {
+  if (!country) return 5
+  const parts = country
+    .toLowerCase()
+    .replace(/\(historic\)/g, '')
+    .split(/\s*(?:,|&|\/|\band\b)\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  let best = 4
+  for (const part of parts) {
+    let rank = 4
+    if (part === 'canada') rank = 0
+    else if (part === 'brazil' || part === 'brasil') rank = 1
+    else if (['us', 'usa', 'u.s.a.', 'united states', 'united states of america'].includes(part)) rank = 2
+    else if (part === 'europe') rank = 3
+    else if (EUROPEAN_COUNTRIES.has(part)) rank = 3.5
+    best = Math.min(best, rank)
+  }
+  return best
+}
+
+/** Stable sort: inside each country group, Discogs' own relevance order is kept. */
+export function sortReleasesByCountryPriority<T extends { country: string | null }>(releases: T[]): T[] {
+  return [...releases].sort((left, right) => countryRank(left.country) - countryRank(right.country))
+}
+
 export function getDiscogsReleaseId(value: string | null | undefined): number | null {
   if (!value) return null
 
@@ -66,7 +107,7 @@ export async function searchDiscogsReleases(
     }
     throw new Error(error.message)
   }
-  return data?.results ?? []
+  return sortReleasesByCountryPriority(data?.results ?? [])
 }
 
 /** Keeps only digits (removes spaces, dashes, etc.). */
@@ -94,7 +135,7 @@ export async function searchDiscogsByBarcode(barcode: string): Promise<DiscogsRe
     )
 
     if (error) throw await extractFunctionError(error, 'discogs-search')
-    if (data?.results?.length) return data.results
+    if (data?.results?.length) return sortReleasesByCountryPriority(data.results)
   }
   return []
 }

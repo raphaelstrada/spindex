@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { supabase } from '@/lib/supabase'
-import { searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
+import { countryRank, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 
@@ -111,16 +111,20 @@ function normalize(value: string) {
 function rankReleases(releases: DiscogsRelease[], detected: Pick<DetectedRecord, 'artist' | 'title' | 'year'>) {
   const uniqueReleases = [...new Map(releases.map((release) => [release.id, release])).values()]
 
+  // Pressing country first (Canada, Brazil, US, Europe, others), then how well the release
+  // matches what was recognized in the photo. Every release is kept: the picker has filters.
   return uniqueReleases
     .map((release) => ({
       release,
-      score: Number(release.country?.toLocaleLowerCase() === 'canada') * 100
-        + Number(normalize(release.artist) === normalize(detected.artist)) * 8
+      rank: countryRank(release.country),
+      score: Number(normalize(release.artist) === normalize(detected.artist)) * 8
         + Number(normalize(release.releaseTitle) === normalize(detected.title)) * 8
         + Number(detected.year !== null && release.year === detected.year) * 2,
     }))
-    .sort((left, right) => right.score - left.score || left.release.title.localeCompare(right.release.title))
-    .slice(0, 8)
+    .sort((left, right) =>
+      left.rank - right.rank
+      || right.score - left.score
+      || left.release.title.localeCompare(right.release.title))
     .map(({ release }) => release)
 }
 
@@ -400,13 +404,11 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
         let results: DiscogsRelease[] = []
         let discogsError: string | undefined
         try {
-          results = await searchDiscogsReleases(detected.artist, detected.title, undefined, {
-            year: detected.year ?? undefined,
-          })
+          // No year pre-filter: every pressing is loaded, ranked by country and year match, and the picker can filter by year.
+          results = await searchDiscogsReleases(detected.artist, detected.title)
           if (!results.some((release) => release.country?.toLocaleLowerCase() === 'canada')) {
             const canadianResults = await searchDiscogsReleases(detected.artist, detected.title, undefined, {
               country: 'Canada',
-              year: detected.year ?? undefined,
             })
             results = [...canadianResults, ...results]
           }
@@ -578,6 +580,8 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
         </div>
 
         <DiscogsCandidatePicker
+          key={activeRecord.id}
+          language={language}
           title={t.discogsOptions}
           hint={t.canadianFirst}
           error={activeRecord.discogsError}

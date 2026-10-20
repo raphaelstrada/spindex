@@ -5,7 +5,7 @@ import * as z from 'zod'
 import { ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { getCollectionOwner } from '@/lib/collection'
-import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
+import { countryRank, getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -357,22 +357,17 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     }).format(Number(value))
   }
 
-  const discogsCountries = [...new Set(discogsResults.map((release) => release.country).filter((country): country is string => Boolean(country)))].sort()
+  const discogsCountries = [...new Set(discogsResults.map((release) => release.country).filter((country): country is string => Boolean(country)))]
+    .sort((left, right) => countryRank(left) - countryRank(right) || left.localeCompare(right))
   const discogsYears = [...new Set(discogsResults.map((release) => release.year).filter((year): year is number => year !== null))]
     .sort((left, right) => right - left)
-  // Prefer releases pressed in Canada, then Brazil, then the US.
-  const countryPreference = (country: string | null) => {
-    if (country === 'Canada') return 0
-    if (country === 'Brazil') return 1
-    if (country === 'US' || country === 'USA' || country === 'United States') return 2
-    return 3
-  }
+  // Pressing-country priority: Canada, Brazil, US, Europe, others (see countryRank).
   const filteredDiscogsResults = discogsResults
     .filter((release) =>
       (discogsCountryFilter === 'all' || release.country === discogsCountryFilter)
       && (discogsYearFilter === 'all' || String(release.year) === discogsYearFilter),
     )
-    .sort((left, right) => countryPreference(left.country) - countryPreference(right.country))
+    .sort((left, right) => countryRank(left.country) - countryRank(right.country))
   const hasDiscogsFilters = discogsCountryFilter !== 'all' || discogsYearFilter !== 'all'
 
   return (

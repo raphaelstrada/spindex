@@ -94,7 +94,10 @@ export function BarcodeRecordImport({
       </div>
 
       <DiscogsCandidatePicker
+        key={barcode}
+        language={language}
         title={photo.discogsOptions}
+        hint={photo.canadianFirst}
         error={error}
         isLoading={isLoading}
         loadingLabel={app.barcodeSearching}

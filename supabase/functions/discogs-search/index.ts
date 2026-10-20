@@ -45,6 +45,10 @@ type DiscogsReleaseDetails = {
   uri?: string
 }
 
+// Discogs returns at most 100 results per page. We follow every page; this cap (2,000 releases)
+// is only a safety net against runaway searches and the edge function time limit.
+const MAX_SEARCH_PAGES = 20
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -194,9 +198,14 @@ Deno.serve(async (request) => {
     if (year) searchUrl.searchParams.set('year', year)
     if (barcode) searchUrl.searchParams.set('barcode', barcode)
     searchUrl.searchParams.set('format', 'Vinyl')
-    searchUrl.searchParams.set('per_page', '50')
+    searchUrl.searchParams.set('per_page', '100') // Discogs maximum
 
-    const discogsResponse = await fetch(searchUrl, { headers: discogsHeaders })
+    const fetchSearchPage = (page: number) => {
+      searchUrl.searchParams.set('page', String(page))
+      return fetch(searchUrl, { headers: discogsHeaders })
+    }
+
+    const discogsResponse = await fetchSearchPage(1)
 
     if (!discogsResponse.ok) {
       if (discogsResponse.status === 401 || discogsResponse.status === 403) {
@@ -206,7 +215,23 @@ Deno.serve(async (request) => {
     }
 
     const payload = await discogsResponse.json()
-    const results = (payload.results as DiscogsResult[] ?? [])
+    const allReleases: DiscogsResult[] = [...((payload.results as DiscogsResult[] | undefined) ?? [])]
+    const totalPages = Number(payload.pagination?.pages) || 1
+
+    // Collect every remaining page. If a later page fails (e.g. Discogs rate limit), return what we
+    // already have instead of failing the whole search.
+    for (let page = 2; page <= Math.min(totalPages, MAX_SEARCH_PAGES); page++) {
+      const pageResponse = await fetchSearchPage(page)
+      if (!pageResponse.ok) {
+        console.warn(`Discogs search page ${page} failed with HTTP ${pageResponse.status}; returning partial results.`)
+        await pageResponse.body?.cancel()
+        break
+      }
+      const pagePayload = await pageResponse.json()
+      allReleases.push(...((pagePayload.results as DiscogsResult[] | undefined) ?? []))
+    }
+
+    const results = [...new Map(allReleases.map((release) => [release.id, release])).values()]
       .filter((release) => release.cover_image || release.thumb)
       .map((release) => {
         const separatorIndex = release.title.lastIndexOf(' - ')
