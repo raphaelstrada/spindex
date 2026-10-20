@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { AlertCircle, ArrowRight, Disc3, Images, LoaderCircle, Search } from 'lucide-react'
+import { AlertCircle, ArrowRight, Disc3, Images, LoaderCircle, Search, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { getCollectionOwner } from '@/lib/collection'
 import { countryRank, getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
@@ -148,6 +148,9 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const [duplicateRecord, setDuplicateRecord] = useState<VinylRecord | null>(null)
   const [pendingFormValues, setPendingFormValues] = useState<FormValues | null>(null)
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false)
+  const [existingDuplicate, setExistingDuplicate] = useState<VinylRecord | null>(null)
+  const [isCheckingExisting, setIsCheckingExisting] = useState(false)
+  const duplicateCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const form = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(createFormSchema(language)),
     defaultValues: {
@@ -338,6 +341,37 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     void handleDiscogsSearch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSearchDiscogs])
+
+  useEffect(() => {
+    const artist = form.getValues('artist').trim()
+    const title = form.getValues('title').trim()
+
+    if (duplicateCheckTimeoutRef.current) {
+      clearTimeout(duplicateCheckTimeoutRef.current)
+    }
+
+    if (artist && title) {
+      setIsCheckingExisting(true)
+      duplicateCheckTimeoutRef.current = setTimeout(async () => {
+        try {
+          const duplicate = await checkDuplicateRecord(artist, title)
+          setExistingDuplicate(duplicate)
+        } catch {
+          setExistingDuplicate(null)
+        } finally {
+          setIsCheckingExisting(false)
+        }
+      }, 500)
+    } else {
+      setExistingDuplicate(null)
+    }
+
+    return () => {
+      if (duplicateCheckTimeoutRef.current) {
+        clearTimeout(duplicateCheckTimeoutRef.current)
+      }
+    }
+  }, [form.watch('artist'), form.watch('title')])
 
   async function selectDiscogsRelease(release: DiscogsRelease) {
     setSelectedDiscogsTitle(release.title)
@@ -567,6 +601,36 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
         </div>
 
         <div className="space-y-3">
+          {existingDuplicate && !record && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/30 dark:bg-amber-950/20">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
+                  {t.similarRecordExists}
+                </p>
+                <p className="text-xs text-amber-800 dark:text-amber-300">
+                  {existingDuplicate.artist} – {existingDuplicate.title}
+                  {existingDuplicate.year_pressed && ` (${existingDuplicate.year_pressed}`}
+                  {existingDuplicate.country_pressed && `, ${existingDuplicate.country_pressed}`}
+                  {existingDuplicate.year_pressed && ')'}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 shrink-0 px-0"
+                onClick={() => {
+                  form.setValue('artist', '')
+                  form.setValue('title', '')
+                  setExistingDuplicate(null)
+                }}
+                title={t.skipRecord}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+          )}
           {selectedDiscogsTitle && (
             <p className="text-sm text-muted-foreground">
               {t.discogsReleaseSelected} {selectedDiscogsTitle}
