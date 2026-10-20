@@ -54,8 +54,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
-import { getCollectionOwner } from '@/lib/collection'
-import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsReleases, syncRecordsToDiscogs, type DiscogsSyncResult } from '@/lib/discogs'
+import { useCollectionOwner } from '@/lib/collection'
+import { getDiscogsLowestPrice, getDiscogsReleaseId, getDiscogsTokenProblem, migrateLegacyDiscogsToken, saveDiscogsToken, searchDiscogsReleases, syncRecordsToDiscogs, type DiscogsSyncResult } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 
@@ -111,6 +111,7 @@ function formatMarketplacePrice(price: number, currency: string | null | undefin
 }
 
 export function DataTable({ language, recordsVersion }: { language: Language; recordsVersion: number }) {
+  const owner = useCollectionOwner()
   const [data, setData] = useState<VinylRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -220,7 +221,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           const { data: records, error } = await supabase
             .from('vinyl_records')
             .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, price_on_discogs, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url, created_at')
-            .ilike('collection_owner', getCollectionOwner())
+            .eq('collection_owner', owner)
             .order('created_at', { ascending: false })
             .order('id', { ascending: true })
             .range(from, from + pageSize - 1)
@@ -243,7 +244,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       }
     }
     fetchRecords()
-  }, [recordsVersion])
+  }, [recordsVersion, owner])
 
   async function toggleSold(record: VinylRecord) {
     const sold = !record.sold
@@ -536,11 +537,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       if (!confirmed) return
     }
 
-    let token = window.localStorage.getItem('spindex-discogs-token') ?? ''
-    if (!token) {
-      token = window.prompt(syncUiText.discogsTokenPrompt)?.trim() ?? ''
-      if (!token) return
-    }
+    await migrateLegacyDiscogsToken().catch((error) => console.error('Could not move the Discogs token to the server:', error))
 
     setIsSyncLoading(true)
     setSyncSummary(null)
@@ -562,11 +559,9 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     try {
       for (const chunk of chunks) {
         const response = await syncRecordsToDiscogs(
-          token,
           chunk.map(({ record, releaseId }) => ({ id: record.id, discogsReleaseId: releaseId })),
           action,
         )
-        window.localStorage.setItem('spindex-discogs-token', token)
         username = response.username
         allResults.push(...response.results)
         totals.added += response.summary.added
@@ -643,11 +638,17 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     } catch (error) {
       console.error('Discogs sync failed:', error)
       const message = error instanceof Error ? error.message : String(error)
-      if (/token|401/i.test(message)) {
-        window.localStorage.removeItem('spindex-discogs-token')
-        const retryToken = window.prompt(syncUiText.discogsTokenInvalid)?.trim() ?? ''
-        if (retryToken) {
-          window.localStorage.setItem('spindex-discogs-token', retryToken)
+      const tokenProblem = getDiscogsTokenProblem(message)
+      if (tokenProblem) {
+        const promptText = tokenProblem === 'missing' ? syncUiText.discogsTokenPrompt : syncUiText.discogsTokenInvalid
+        const newToken = window.prompt(promptText)?.trim() ?? ''
+        if (newToken) {
+          try {
+            await saveDiscogsToken(newToken)
+          } catch (saveError) {
+            setSyncSummary(`⚠️ ${saveError instanceof Error ? saveError.message : String(saveError)}`)
+            return
+          }
           setSyncSummary(null)
           setIsSyncLoading(false)
           setSyncProgress(null)
@@ -673,12 +674,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     const text = translations[language].table
     const oldReleaseUrl = oldReleaseId ? `https://www.discogs.com/release/${oldReleaseId}` : ''
 
-    let token = window.localStorage.getItem('spindex-discogs-token') ?? ''
-    if (!token) token = window.prompt(text.discogsTokenPrompt)?.trim() ?? ''
-    if (!token) {
-      setSyncSummary(`⚠️ ${text.releaseChangeNoToken.replace('{url}', oldReleaseUrl)}`)
-      return
-    }
+    await migrateLegacyDiscogsToken().catch((error) => console.error('Could not move the Discogs token to the server:', error))
 
     setIsSyncLoading(true)
     setSyncSummary(null)
@@ -687,8 +683,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
 
     try {
       if (oldReleaseId !== null) {
-        const removal = await syncRecordsToDiscogs(token, [{ id: recordId, discogsReleaseId: oldReleaseId }], 'remove')
-        window.localStorage.setItem('spindex-discogs-token', token)
+        const removal = await syncRecordsToDiscogs([{ id: recordId, discogsReleaseId: oldReleaseId }], 'remove')
         const result = removal.results[0]
         if (!result || (result.status !== 'removed' && result.status !== 'not_in_collection')) {
           throw new Error(result?.error ?? result?.status ?? 'unknown error')
@@ -697,8 +692,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
 
       if (newReleaseId !== null) {
         stage = 'add'
-        const addition = await syncRecordsToDiscogs(token, [{ id: recordId, discogsReleaseId: newReleaseId }], 'add')
-        window.localStorage.setItem('spindex-discogs-token', token)
+        const addition = await syncRecordsToDiscogs([{ id: recordId, discogsReleaseId: newReleaseId }], 'add')
         const result = addition.results[0]
         if (!result || (result.status !== 'added' && result.status !== 'already_in_collection')) {
           throw new Error(result?.error ?? result?.status ?? 'unknown error')
@@ -714,12 +708,22 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error('Mirroring the release change on Discogs failed:', error)
-      if (/token|401/i.test(message) && !isRetry) {
-        window.localStorage.removeItem('spindex-discogs-token')
-        const retryToken = window.prompt(text.discogsTokenInvalid)?.trim() ?? ''
-        if (retryToken) {
-          window.localStorage.setItem('spindex-discogs-token', retryToken)
-          return await mirrorReleaseChangeToDiscogs(recordId, oldReleaseId, newReleaseId, true)
+      const tokenProblem = getDiscogsTokenProblem(message)
+      if (tokenProblem && !isRetry) {
+        const promptText = tokenProblem === 'missing' ? text.discogsTokenPrompt : text.discogsTokenInvalid
+        const newToken = window.prompt(promptText)?.trim() ?? ''
+        if (newToken) {
+          try {
+            await saveDiscogsToken(newToken)
+            return await mirrorReleaseChangeToDiscogs(recordId, oldReleaseId, newReleaseId, true)
+          } catch (saveError) {
+            setSyncSummary(`⚠️ ${saveError instanceof Error ? saveError.message : String(saveError)}`)
+            return
+          }
+        }
+        if (tokenProblem === 'missing') {
+          setSyncSummary(`⚠️ ${text.releaseChangeNoToken.replace('{url}', oldReleaseUrl)}`)
+          return
         }
       }
       const template = stage === 'remove' ? text.releaseChangeRemoveFailed : text.releaseChangeAddFailed

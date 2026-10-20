@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { AlertCircle, ArrowRight, Disc3, Hash, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { getCollectionOwner } from '@/lib/collection'
+import { useCollectionOwner, type CollectionOwner } from '@/lib/collection'
 import { countryRank, getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsByCatalogNumber, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import { Button } from '@/components/ui/button'
 import {
@@ -58,11 +58,11 @@ async function calculateSimilarity(str1: string, str2: string): Promise<number> 
   return (longer.length - editDistance) / longer.length
 }
 
-async function checkDuplicateRecord(artist: string, title: string): Promise<VinylRecord | null> {
+async function checkDuplicateRecord(artist: string, title: string, owner: CollectionOwner): Promise<VinylRecord | null> {
   const { data: records } = await supabase
     .from('vinyl_records')
     .select('*')
-    .eq('collection_owner', getCollectionOwner())
+    .eq('collection_owner', owner)
 
   if (!records || records.length === 0) return null
 
@@ -133,6 +133,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   onSkip?: () => void
 }) {
   const t = translations[language].form
+  const owner = useCollectionOwner()
   const [discogsSearching, setDiscogsSearching] = useState(false)
   const [discogsResults, setDiscogsResults] = useState<DiscogsRelease[]>([])
   const [discogsSearchError, setDiscogsSearchError] = useState<string | null>(null)
@@ -152,8 +153,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const [duplicateRecord, setDuplicateRecord] = useState<VinylRecord | null>(null)
   const [pendingFormValues, setPendingFormValues] = useState<FormValues | null>(null)
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false)
-  const [existingDuplicate, setExistingDuplicate] = useState<VinylRecord | null>(null)
-  const [isCheckingExisting, setIsCheckingExisting] = useState(false)
+  const [foundDuplicate, setFoundDuplicate] = useState<VinylRecord | null>(null)
   const [duplicateAcknowledged, setDuplicateAcknowledged] = useState(false)
   const duplicateCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -165,7 +165,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     }
     form.setValue('artist', '')
     form.setValue('title', '')
-    setExistingDuplicate(null)
+    setFoundDuplicate(null)
   }
   const form = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(createFormSchema(language)),
@@ -201,7 +201,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     if (!record) {
       setIsCheckingDuplicate(true)
       try {
-        const duplicate = await checkDuplicateRecord(values.artist, values.title)
+        const duplicate = await checkDuplicateRecord(values.artist, values.title, owner)
         if (duplicate) {
           setDuplicateRecord(duplicate)
           setPendingFormValues(values)
@@ -261,7 +261,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     }
     const { error } = record
       ? await supabase.from('vinyl_records').update(databaseValues).eq('id', record.id)
-      : await supabase.from('vinyl_records').insert([{ ...databaseValues, collection_owner: getCollectionOwner() }])
+      : await supabase.from('vinyl_records').insert([{ ...databaseValues, collection_owner: owner }])
 
     if (error) {
       console.error('Failed to insert record:', error.message)
@@ -381,6 +381,8 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
 
   const watchedArtist = form.watch('artist')
   const watchedTitle = form.watch('title')
+  // Only show a duplicate while both artist and title are filled in.
+  const existingDuplicate = watchedArtist.trim() && watchedTitle.trim() ? foundDuplicate : null
 
   useEffect(() => {
     const artist = watchedArtist.trim()
@@ -391,22 +393,17 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     }
 
     if (artist && title) {
-      setIsCheckingExisting(true)
       duplicateCheckTimeoutRef.current = setTimeout(async () => {
         try {
-          const duplicate = await checkDuplicateRecord(artist, title)
-          setExistingDuplicate((current) => {
+          const duplicate = await checkDuplicateRecord(artist, title, owner)
+          setFoundDuplicate((current) => {
             if (current?.id !== duplicate?.id) setDuplicateAcknowledged(false)
             return duplicate
           })
         } catch {
-          setExistingDuplicate(null)
-        } finally {
-          setIsCheckingExisting(false)
+          setFoundDuplicate(null)
         }
       }, 500)
-    } else {
-      setExistingDuplicate(null)
     }
 
     return () => {
@@ -414,7 +411,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
         clearTimeout(duplicateCheckTimeoutRef.current)
       }
     }
-  }, [watchedArtist, watchedTitle])
+  }, [watchedArtist, watchedTitle, owner])
 
   async function selectDiscogsRelease(release: DiscogsRelease) {
     setSelectedDiscogsTitle(release.title)

@@ -1,11 +1,13 @@
+import { useAuth } from '@/lib/auth'
+
 export type CollectionOwner = 'Raphael' | 'Tim'
 
 /**
- * Returns the collection owner based on the current URL.
- * The Tim collection is only visible when the URL hash contains `#/tim`
- * (e.g. /spindex/#/tim), which works on static hosting without rewrites.
+ * Returns the collection owner of the logged-in admin (from the `admins` table).
+ * Only usable under `RequireAdmin`.
  */
-export function getCollectionOwner(): CollectionOwner {
-  const url = `${window.location.pathname}${window.location.hash}`.toLowerCase()
-  return url.includes('/tim') ? 'Tim' : 'Raphael'
+export function useCollectionOwner(): CollectionOwner {
+  const { owner } = useAuth()
+  if (!owner) throw new Error('useCollectionOwner must be used inside RequireAdmin')
+  return owner
 }

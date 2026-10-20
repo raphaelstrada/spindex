@@ -234,14 +234,36 @@ async function extractFunctionError(error: unknown, functionName: string): Promi
   return error instanceof Error ? error : new Error(message)
 }
 
+const LEGACY_TOKEN_STORAGE_KEY = 'spindex-discogs-token'
+
+// Saves the logged-in admin's Discogs personal access token on the server (write-only).
+export async function saveDiscogsToken(token: string): Promise<void> {
+  const { error } = await supabase.rpc('set_my_discogs_token', { p_token: token.trim() })
+  if (error) throw new Error(error.message)
+}
+
+// Tokens used to live in localStorage: move one to the server once, then forget it locally.
+export async function migrateLegacyDiscogsToken(): Promise<void> {
+  const legacyToken = window.localStorage.getItem(LEGACY_TOKEN_STORAGE_KEY)?.trim()
+  if (!legacyToken) return
+  await saveDiscogsToken(legacyToken)
+  window.localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY)
+}
+
+// 'missing' / 'invalid' when the sync failed because of the saved Discogs token.
+export function getDiscogsTokenProblem(message: string): 'missing' | 'invalid' | null {
+  if (message.includes('DISCOGS_TOKEN_MISSING')) return 'missing'
+  if (message.includes('DISCOGS_TOKEN_INVALID')) return 'invalid'
+  return null
+}
+
 export async function syncRecordsToDiscogs(
-  discogsToken: string,
   records: { id: string; discogsReleaseId: number }[],
   action: 'add' | 'remove' = 'add',
 ): Promise<DiscogsSyncResponse> {
   const { data, error } = await supabase.functions.invoke<DiscogsSyncResponse>(
     'discogs-sync',
-    { body: { discogsToken, records, action } },
+    { body: { records, action } },
   )
 
   if (error) {

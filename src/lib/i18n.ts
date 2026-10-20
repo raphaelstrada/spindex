@@ -128,7 +128,7 @@ export const translations = {
       selectSyncedOnly: 'Select synced only',
       selectNotSynced: 'Select not synced',
       syncingWithDiscogs: 'Syncing with Discogs...',
-      discogsTokenPrompt: 'Sync with YOUR Discogs collection.\n\n1. Open https://www.discogs.com/settings/developers\n2. If this is your first time, check "I have read and agree to the Discogs API Terms of Use"\n3. Click "Generate new token" (in the personal access token section, NOT the Consumer Key/Secret)\n4. Copy the generated token and paste it here:\n\nThe token is stored only in this browser.',
+      discogsTokenPrompt: 'Sync with YOUR Discogs collection.\n\n1. Open https://www.discogs.com/settings/developers\n2. If this is your first time, check "I have read and agree to the Discogs API Terms of Use"\n3. Click "Generate new token" (in the personal access token section, NOT the Consumer Key/Secret)\n4. Copy the generated token and paste it here:\n\nThe token is saved to your Spindex account on the server and is never shown again.',
       discogsTokenInvalid: 'The Discogs token was rejected. Enter it again:',
       noReleaseForSync: 'No selected record has a valid Discogs release link.',
       syncSummary: 'Sync complete for {username}: {added} added, {alreadyInCollection} already in collection, {noRelease} without release, {failed} failed.',
@@ -321,6 +321,19 @@ export const translations = {
       skipRecord: 'Skip this record',
       continueAnyway: 'Continue anyway',
     },
+    storefront: {
+      comingSoon: 'Coming soon',
+    },
+    auth: {
+      loginTitle: 'Admin sign in',
+      email: 'Email',
+      password: 'Password',
+      signIn: 'Sign in',
+      signingIn: 'Signing in...',
+      signOut: 'Sign out',
+      invalidCredentials: 'Invalid email or password.',
+      notAuthorized: 'This account is not an admin.',
+    },
   },
   pt: {
     app: {
@@ -449,7 +462,7 @@ export const translations = {
       selectSyncedOnly: 'Selecionar só sincronizados',
       selectNotSynced: 'Selecionar não sincronizados',
       syncingWithDiscogs: 'Sincronizando com o Discogs...',
-      discogsTokenPrompt: 'Sincronizar com a SUA coleção do Discogs.\n\n1. Abra https://www.discogs.com/settings/developers\n2. Se for a primeira vez, marque "I have read and agree to the Discogs API Terms of Use"\n3. Clique em "Generate new token" (na seção de personal access token, NÃO é o Consumer Key/Secret)\n4. Copie o token gerado e cole aqui:\n\nO token fica salvo apenas neste navegador.',
+      discogsTokenPrompt: 'Sincronizar com a SUA coleção do Discogs.\n\n1. Abra https://www.discogs.com/settings/developers\n2. Se for a primeira vez, marque "I have read and agree to the Discogs API Terms of Use"\n3. Clique em "Generate new token" (na seção de personal access token, NÃO é o Consumer Key/Secret)\n4. Copie o token gerado e cole aqui:\n\nO token fica salvo na sua conta do Spindex, no servidor, e não é exibido novamente.',
       discogsTokenInvalid: 'O token do Discogs foi recusado. Cole-o novamente:',
       noReleaseForSync: 'Nenhum disco selecionado tem um link de edição válido do Discogs.',
       syncSummary: 'Sincronização concluída para {username}: {added} adicionados, {alreadyInCollection} já estavam na coleção, {noRelease} sem edição, {failed} falharam.',
@@ -641,6 +654,19 @@ export const translations = {
       similarRecordExists: 'Disco similar já existe na sua coleção',
       skipRecord: 'Pular este disco',
       continueAnyway: 'Continuar mesmo assim',
+    },
+    storefront: {
+      comingSoon: 'Em breve',
+    },
+    auth: {
+      loginTitle: 'Entrar como admin',
+      email: 'E-mail',
+      password: 'Senha',
+      signIn: 'Entrar',
+      signingIn: 'Entrando...',
+      signOut: 'Sair',
+      invalidCredentials: 'E-mail ou senha inválidos.',
+      notAuthorized: 'Esta conta não é de um admin.',
     },
   },
 } as const

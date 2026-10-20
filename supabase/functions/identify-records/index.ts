@@ -1,3 +1,5 @@
+import { requireAdmin } from '../_shared/auth.ts'
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -26,6 +28,9 @@ function jsonResponse(body: unknown, status = 200) {
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405)
+
+  const admin = await requireAdmin(request, corsHeaders)
+  if (admin instanceof Response) return admin
 
   try {
     const body = await request.json()
