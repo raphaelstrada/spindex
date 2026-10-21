@@ -9,10 +9,14 @@ export function serviceClient() {
   return createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
 }
 
+// Pinned so an SDK upgrade cannot silently change the shape of API responses and webhook events.
+// The webhook endpoint in the Stripe Dashboard should use the same version.
+export const STRIPE_API_VERSION = '2025-02-24.acacia'
+
 export function stripeClient() {
   const secretKey = Deno.env.get('STRIPE_SECRET_KEY')
   if (!secretKey) throw new Error('STRIPE_SECRET_KEY is not configured.')
-  return new Stripe(secretKey, { httpClient: Stripe.createFetchHttpClient() })
+  return new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION, httpClient: Stripe.createFetchHttpClient() })
 }
 
 export const CHECKOUT_SESSION_PATTERN = /^cs_(test|live)_[A-Za-z0-9]+$/

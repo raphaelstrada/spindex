@@ -32,6 +32,12 @@ type ReserveResult =
   | { ok: true, records: ReservedRecord[] }
   | { ok: false, unavailable_ids: string[] }
 
+async function reservationKey(recordIds: string[], reservedUntil: string) {
+  const input = new TextEncoder().encode(`${[...recordIds].sort().join(',')}|${reservedUntil}`)
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', input))
+  return `checkout-${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -103,8 +109,14 @@ async function createCheckout(recordIds: string[], language: string) {
 
     const taxBehavior = COLLECT_TAX ? { tax_behavior: 'inclusive' as const } : {}
 
+    // One key per reservation: a retried request reuses the same session instead of creating a second one.
+    const idempotencyKey = await reservationKey(recordIds, reservedUntil)
+
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      // Card only (Apple Pay, Google Pay and Link included): it confirms instantly. Delayed methods such as
+      // Canadian pre-authorized debit settle days after the 30-minute reservation ends.
+      payment_method_types: ['card'],
       currency: 'cad',
       locale: language === 'pt' ? 'pt-BR' : 'en',
       line_items: reserve.records.map((record) => ({
@@ -130,7 +142,7 @@ async function createCheckout(recordIds: string[], language: string) {
       metadata: { record_ids: reserve.records.map((record) => record.id).join(',') },
       success_url: `${siteUrl}/order/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl}/bag?cancelled={CHECKOUT_SESSION_ID}`,
-    })
+    }, { idempotencyKey })
 
     const { error: linkError } = await supabase
       .from('vinyl_records')

@@ -106,6 +106,7 @@ Secrets (Supabase only, never in `.env`): `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_S
 5. In the Stripe Dashboard (still in test mode), go to Developers > Webhooks > Add endpoint:
    - URL: `https://<project-ref>.supabase.co/functions/v1/stripe-webhook`
    - Events: `checkout.session.completed` and `checkout.session.expired`
+   - API version: `2025-02-24.acacia` (the version pinned in `supabase/functions/_shared/checkout.ts`)
 6. Copy the endpoint's signing secret and set it: `supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...`.
 7. Pay with the card `4242 4242 4242 4242`, any future expiry date, any CVC and any Canadian address. The record becomes sold, leaves the storefront, and the order appears in Admin > Orders.
 8. To test an abandoned checkout without waiting 30 minutes, run `stripe checkout sessions expire cs_test_...` with the Stripe CLI.
