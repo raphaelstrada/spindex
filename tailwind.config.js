@@ -11,6 +11,7 @@ export default {
         sans: ["Helvetica Neue", "Helvetica", "Arial", "sans-serif"],
         "space-grotesk": ["Space Grotesk", "Helvetica Neue", "sans-serif"],
         "special-elite": ["Special Elite", "Courier New", "monospace"],
+        "mono-ui": ["IBM Plex Mono", "ui-monospace", "Menlo", "monospace"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -32,9 +33,23 @@ export default {
           green: "#008c44",
           blue: "#0081c6",
         },
+        store: {
+          ink: "#151515",
+          panel: "#e8e8e8",
+          muted: "#6b6b6b",
+          line: "#d9d9d9",
+        },
       },
       boxShadow: {
         polaroid: "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -1px rgb(0 0 0 / 0.06), 0 10px 15px -3px rgb(0 0 0 / 0.1)",
+      },
+      keyframes: {
+        "accordion-down": { from: { height: "0" }, to: { height: "var(--radix-accordion-content-height)" } },
+        "accordion-up": { from: { height: "var(--radix-accordion-content-height)" }, to: { height: "0" } },
+      },
+      animation: {
+        "accordion-down": "accordion-down 0.2s ease-out",
+        "accordion-up": "accordion-up 0.2s ease-out",
       },
       borderRadius: {
         lg: "var(--radius)",

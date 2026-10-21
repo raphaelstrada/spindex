@@ -4,6 +4,11 @@
 
 begin;
 
+-- Test order that contains only a Tim record (inserted as the table owner, rolled back).
+insert into public.orders (stripe_session_id, record_ids, status)
+select 'cs_test_rls_check', array[id], 'paid'
+from public.vinyl_records where collection_owner = 'Tim' limit 1;
+
 -- As Raphael ----------------------------------------------------------------------
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"<raphael-user-uuid>","role":"authenticated"}', true);
@@ -55,6 +60,17 @@ begin
     raise exception 'FAIL: default owner is %, expected Raphael', inserted_owner;
   end if;
 
+  if exists (select 1 from public.orders where stripe_session_id = 'cs_test_rls_check') then
+    raise exception 'FAIL: Raphael can read an order with only Tim records';
+  end if;
+
+  begin
+    insert into public.orders (stripe_session_id, status) values ('cs_test_rls_insert', 'paid');
+    raise exception 'FAIL: Raphael inserted an order';
+  exception when insufficient_privilege then
+    null;
+  end;
+
   raise notice 'PASS: Raphael is isolated from Tim';
 end
 $$;
@@ -86,6 +102,38 @@ begin
   exception when insufficient_privilege then
     null;
   end;
+
+  begin
+    perform 1 from public.orders limit 1;
+    raise exception 'FAIL: anon can read orders';
+  exception when insufficient_privilege then
+    null;
+  end;
+
+  begin
+    perform 1 from public.shipping_settings limit 1;
+    raise exception 'FAIL: anon can read shipping_settings';
+  exception when insufficient_privilege then
+    null;
+  end;
+
+  begin
+    perform public.reserve_records('{}'::uuid[], now());
+    raise exception 'FAIL: anon can call reserve_records';
+  exception when insufficient_privilege then
+    null;
+  end;
+
+  begin
+    perform public.shipping_cad(1, 0);
+    raise exception 'FAIL: anon can call shipping_cad';
+  exception when insufficient_privilege then
+    null;
+  end;
+
+  if (public.bag_quote('{}'::uuid[]) ->> 'shipping_cad')::numeric <> 0 then
+    raise exception 'FAIL: bag_quote of an empty bag should have no shipping';
+  end if;
 
   perform 1 from public.public_catalog limit 1;
 

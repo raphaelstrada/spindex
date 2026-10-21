@@ -6,6 +6,8 @@ import { BarcodeScanner } from '@/components/BarcodeScanner'
 import { BarcodeRecordImport } from '@/components/BarcodeRecordImport'
 import { CatalogNumberRecordImport } from '@/components/CatalogNumberRecordImport'
 import { DataTable } from '@/components/DataTable'
+import { OrdersDialog } from '@/components/OrdersDialog'
+import { ShippingSettingsDialog } from '@/components/ShippingSettingsDialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import {
@@ -114,6 +116,8 @@ export default function AdminPage() {
           >
             <LogOut aria-hidden="true" />
           </Button>
+          <OrdersDialog language={language} />
+          <ShippingSettingsDialog language={language} />
           <Dialog open={isOpen} onOpenChange={(open) => {
             setIsOpen(open)
             if (!open) {

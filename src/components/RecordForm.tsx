@@ -103,6 +103,8 @@ function createFormSchema(language: Language) {
     special_edition_reason: z.string().optional(),
     sell_possibility: z.boolean().default(false),
     sold: z.boolean().default(false),
+    is_hero: z.boolean().default(false),
+    hero_tagline: z.string().max(90, t.heroTaglineTooLong).optional(),
     discogs_lowest_price: z.coerce.number().nonnegative().optional(),
     marketplace_price: z.preprocess(
       (value) => value === '' || value === null ? undefined : value,
@@ -187,6 +189,8 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       special_edition_reason: record?.special_edition_reason ?? '',
       sell_possibility: record?.sell_possibility ?? initialValues?.sell_possibility ?? false,
       sold: record?.sold ?? false,
+      is_hero: record?.is_hero === true,
+      hero_tagline: typeof record?.hero_tagline === 'string' ? record.hero_tagline : '',
       discogs_lowest_price: record?.discogs_lowest_price ?? initialValues?.discogs_lowest_price ?? undefined,
       marketplace_price: record?.marketplace_price ?? initialValues?.marketplace_price ?? undefined,
       marketplace_currency: record?.marketplace_currency ?? initialValues?.marketplace_currency ?? '',
@@ -257,6 +261,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       sleeve_condition: valuesToSave.sleeve_condition || null,
       marketplace_price: valuesToSave.marketplace_price ?? null,
       marketplace_currency: valuesToSave.marketplace_currency || null,
+      hero_tagline: valuesToSave.hero_tagline?.trim() || null,
       ...(releaseChanged ? { discogs_synced_at: null } : {}),
     }
     const { error } = record
@@ -289,6 +294,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       sleeve_condition: pendingFormValues.sleeve_condition || null,
       marketplace_price: pendingFormValues.marketplace_price ?? null,
       marketplace_currency: pendingFormValues.marketplace_currency || null,
+      hero_tagline: pendingFormValues.hero_tagline?.trim() || null,
     }
 
     const { error } = await supabase
@@ -381,6 +387,12 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
 
   const watchedArtist = form.watch('artist')
   const watchedTitle = form.watch('title')
+  const watchedIsHero = form.watch('is_hero')
+  const watchedMarketplacePrice = form.watch('marketplace_price')
+  // Mirrors the public_catalog filter; only drives a non-blocking warning.
+  const heroHiddenFromStore = form.watch('sold')
+    || !form.watch('sell_possibility')
+    || ((watchedMarketplacePrice === undefined || watchedMarketplacePrice === null || watchedMarketplacePrice === '') && record?.price_on_discogs == null)
   // Only show a duplicate while both artist and title are filled in.
   const existingDuplicate = watchedArtist.trim() && watchedTitle.trim() ? foundDuplicate : null
 
@@ -951,7 +963,28 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
               <FormLabel className="cursor-pointer font-normal">{t.sold}</FormLabel>
             </FormItem>
           )} />
+          <FormField control={form.control} name="is_hero" render={({ field }) => (
+            <FormItem className="flex flex-row items-start space-x-2 space-y-0">
+              <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+              <FormLabel className="cursor-pointer font-normal">{t.featureOnHero}</FormLabel>
+            </FormItem>
+          )} />
         </div>
+
+        {watchedIsHero && (
+          <div className="space-y-2">
+            <FormField control={form.control} name="hero_tagline" render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t.heroTagline}</FormLabel>
+                <FormControl><Input maxLength={90} placeholder={t.heroTaglinePlaceholder} {...field} value={field.value ?? ''} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            {heroHiddenFromStore && (
+              <p role="status" className="text-sm text-amber-600">{t.heroHiddenWarning}</p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField control={form.control} name="special_edition_reason" render={({ field }) => (

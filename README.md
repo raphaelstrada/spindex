@@ -82,6 +82,49 @@ Currently, two official plugins are available:
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
 - [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
+## Payments (Stripe Checkout)
+
+The storefront bag holds record ids only. `create-checkout` reserves the records, computes every
+price (`record_sale_price_cad`) and the shipping (`shipping_cad`) in the database, and returns a
+Stripe Checkout URL. `stripe-webhook` marks the records sold and writes the order. Reserved records
+are hidden from `public_catalog` until `reserved_until` passes (about 30 minutes) or the session
+expires. Shipping is edited in Admin > Shipping. Tax is off: `COLLECT_TAX` in
+`supabase/functions/create-checkout/index.ts`.
+
+Secrets (Supabase only, never in `.env`): `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `SITE_URL`.
+
+### Test mode
+
+1. Apply the migration `20261022000000_checkout_orders_shipping.sql` (`supabase db push`, or paste it into the SQL editor), then run `supabase/tests/rls_check.sql`.
+2. In the Stripe Dashboard, switch to **Test mode** and copy the secret key (Developers > API keys).
+3. Set the secrets. `SITE_URL` is the storefront root with no trailing slash:
+   ```sh
+   supabase secrets set STRIPE_SECRET_KEY=sk_test_... SITE_URL=https://<github-user>.github.io/spindex
+   ```
+   For local testing, use `SITE_URL=http://localhost:5173/spindex`.
+4. Deploy the functions: `supabase functions deploy create-checkout` and `supabase functions deploy stripe-webhook`. Both have `verify_jwt = false` in `supabase/config.toml`.
+5. In the Stripe Dashboard (still in test mode), go to Developers > Webhooks > Add endpoint:
+   - URL: `https://<project-ref>.supabase.co/functions/v1/stripe-webhook`
+   - Events: `checkout.session.completed` and `checkout.session.expired`
+6. Copy the endpoint's signing secret and set it: `supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...`.
+7. Pay with the card `4242 4242 4242 4242`, any future expiry date, any CVC and any Canadian address. The record becomes sold, leaves the storefront, and the order appears in Admin > Orders.
+8. To test an abandoned checkout without waiting 30 minutes, run `stripe checkout sessions expire cs_test_...` with the Stripe CLI.
+
+### Going live
+
+1. Activate the Stripe account: business details, identity and payout bank account.
+2. In **Live mode**, create the same webhook endpoint (same URL and the same two events). Live mode has its own signing secret.
+3. Set the live secrets:
+   ```sh
+   supabase secrets set STRIPE_SECRET_KEY=sk_live_... STRIPE_WEBHOOK_SECRET=whsec_...
+   ```
+   Make sure `SITE_URL` points to the production storefront. The secrets take effect without redeploying.
+4. Optional: enable customer email receipts under Settings > Customer emails.
+5. Make one real low-value purchase, check the order in Admin > Orders, then refund it from the Stripe Dashboard. A refund does not relist the record: set `sold` back to false in the admin table.
+6. Later, to collect GST/HST: register for the tax in Stripe Tax (Settings > Tax), set `COLLECT_TAX = true` and redeploy `create-checkout`. Prices are then treated as tax-included.
+
+An order with status **Needs review** means a record was already sold or reserved by another session when the payment arrived. This should not happen because reservations outlive the Stripe session, but if it does, refund one of the two buyers.
+
 ## React Compiler
 
 The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).

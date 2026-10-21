@@ -8,3 +8,10 @@ verify_jwt = true
 
 [functions.discogs-sync]
 verify_jwt = true
+# Public: the storefront calls it without a login. It only accepts record ids and reads prices from the DB.
+[functions.create-checkout]
+verify_jwt = false
+
+# Called by Stripe; authenticated by the Stripe signature (STRIPE_WEBHOOK_SECRET) instead of a JWT.
+[functions.stripe-webhook]
+verify_jwt = false

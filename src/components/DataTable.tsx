@@ -21,6 +21,7 @@ import {
   Minus,
   Pencil,
   Plus,
+  Star,
   Trash2,
   X,
 } from 'lucide-react'
@@ -76,6 +77,12 @@ const dropdownFilterFields = new Set([
 ])
 const compactColumns = new Set(['discogs_lowest_price', 'marketplace_price', 'price_on_discogs'])
 const autocompleteFilterFields = new Set(['artist', 'title'])
+
+// Mirrors the public_catalog filter; only drives a non-blocking hero warning.
+function isHiddenFromStore(record: VinylRecord) {
+  return Boolean(record.sold) || !record.sell_possibility
+    || (record.marketplace_price == null && record.price_on_discogs == null)
+}
 
 function searchableValue(value: unknown, language: Language) {
   if (value === null || value === undefined || value === '') return '-'
@@ -220,7 +227,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         for (;;) {
           const { data: records, error } = await supabase
             .from('vinyl_records')
-            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, price_on_discogs, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url, created_at')
+            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, price_on_discogs, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
             .eq('collection_owner', owner)
             .order('created_at', { ascending: false })
             .order('id', { ascending: true })
@@ -259,6 +266,24 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     } else {
       setData((current) => current.map((item) =>
         item.id === record.id ? { ...item, sold } : item,
+      ))
+    }
+    setPendingActionId(null)
+  }
+
+  async function toggleHero(record: VinylRecord) {
+    const is_hero = record.is_hero !== true
+    setPendingActionId(record.id)
+    const { error } = await supabase
+      .from('vinyl_records')
+      .update({ is_hero })
+      .eq('id', record.id)
+
+    if (error) {
+      alert(`${t.updateFailed} ${error.message}`)
+    } else {
+      setData((current) => current.map((item) =>
+        item.id === record.id ? { ...item, is_hero } : item,
       ))
     }
     setPendingActionId(null)
@@ -824,7 +849,27 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     // Hidden column: only used as the default sort (date the record was added to Spindex).
     { accessorKey: 'created_at', header: t.detailLabels.created_at },
     { accessorKey: 'artist', header: t.artist },
-    { accessorKey: 'title', header: t.title },
+    {
+      accessorKey: 'title',
+      header: t.title,
+      cell: ({ row }) => {
+        const record = row.original
+        if (record.is_hero !== true) return record.title
+        const hidden = isHiddenFromStore(record)
+        return (
+          <span className="inline-flex items-center gap-1">
+            <Star
+              className={`h-3.5 w-3.5 shrink-0 ${hidden ? 'text-muted-foreground' : 'text-amber-500'}`}
+              fill="currentColor"
+              aria-label={hidden ? t.heroHiddenWarning : t.heroIndicator}
+            >
+              <title>{hidden ? t.heroHiddenWarning : t.heroIndicator}</title>
+            </Star>
+            {record.title}
+          </span>
+        )
+      },
+    },
     { accessorKey: 'year_pressed', header: t.year },
     {
       accessorKey: 'catalog_number',
@@ -1101,6 +1146,17 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               onClick={() => void toggleSold(record)}
             >
               <CircleDollarSign aria-hidden="true" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-8 w-8 ${record.is_hero === true ? 'text-amber-500' : ''}`}
+              aria-label={record.is_hero === true ? t.unmarkHero : t.markHero}
+              title={record.is_hero === true ? (isHiddenFromStore(record) ? t.heroHiddenWarning : t.unmarkHero) : t.markHero}
+              disabled={isPending}
+              onClick={() => void toggleHero(record)}
+            >
+              <Star aria-hidden="true" fill={record.is_hero === true ? 'currentColor' : 'none'} />
             </Button>
             <Button
               variant="ghost"
