@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Barcode, Disc3, Hash, Images, LogOut, Moon, PenLine, Sun } from 'lucide-react'
+import { Barcode, Disc3, Hash, Images, LogOut, Moon, PenLine, Settings, Sun } from 'lucide-react'
 import { RecordForm } from '@/components/RecordForm'
 import { PhotoRecordImport } from '@/components/PhotoRecordImport'
 import { BarcodeScanner } from '@/components/BarcodeScanner'
 import { BarcodeRecordImport } from '@/components/BarcodeRecordImport'
 import { CatalogNumberRecordImport } from '@/components/CatalogNumberRecordImport'
-import { DataTable } from '@/components/DataTable'
+import { DataTable, type AdminView } from '@/components/DataTable'
 import { DiscogsVerification } from '@/components/DiscogsVerification'
 import { OrdersDialog } from '@/components/OrdersDialog'
 import { ShippingSettingsDialog } from '@/components/ShippingSettingsDialog'
@@ -14,8 +14,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { translations, type Language } from '@/lib/i18n'
@@ -37,7 +40,14 @@ export default function AdminPage() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     window.localStorage.getItem('spindex-theme') === 'light' ? 'light' : 'dark',
   )
+  const [view, setView] = useState<AdminView>(() =>
+    window.localStorage.getItem('spindex-admin-view') === 'sales' ? 'sales' : 'inventory',
+  )
   const t = translations[language]
+
+  useEffect(() => {
+    window.localStorage.setItem('spindex-admin-view', view)
+  }, [view])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -72,27 +82,33 @@ export default function AdminPage() {
           <p className="mt-1 text-sm text-muted-foreground">{t.app.description}</p>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 sm:justify-end">
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label={theme === 'dark' ? t.app.switchToLightMode : t.app.switchToDarkMode}
-            title={theme === 'dark' ? t.app.switchToLightMode : t.app.switchToDarkMode}
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          >
-            {theme === 'dark' ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
-          </Button>
+          <div role="group" aria-label={t.app.adminView} className="inline-flex rounded-md border p-0.5">
+            {(['inventory', 'sales'] as const).map((option) => (
+              <Button
+                key={option}
+                type="button"
+                size="sm"
+                variant={view === option ? 'default' : 'ghost'}
+                aria-pressed={view === option}
+                onClick={() => setView(option)}
+              >
+                {option === 'inventory' ? t.app.viewInventory : t.app.viewSales}
+              </Button>
+            ))}
+          </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label={t.app.changeLanguage}
-                title={t.app.changeLanguage}
-              >
-                <span aria-hidden="true">{language === 'en' ? '🇬🇧' : '🇧🇷'}</span>
+              <Button variant="outline" size="icon" aria-label={t.app.settingsMenu} title={t.app.settingsMenu}>
+                <Settings aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                {theme === 'dark' ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+                {theme === 'dark' ? t.app.switchToLightMode : t.app.switchToDarkMode}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>{t.app.changeLanguage}</DropdownMenuLabel>
               <DropdownMenuRadioGroup
                 value={language}
                 onValueChange={(value) => setLanguage(value as Language)}
@@ -106,20 +122,22 @@ export default function AdminPage() {
                   {t.app.portuguese}
                 </DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => supabase.auth.signOut()}>
+                <LogOut aria-hidden="true" />
+                {t.auth.signOut}
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label={t.auth.signOut}
-            title={t.auth.signOut}
-            onClick={() => supabase.auth.signOut()}
-          >
-            <LogOut aria-hidden="true" />
-          </Button>
-          <OrdersDialog language={language} />
-          <ShippingSettingsDialog language={language} />
+          {view === 'sales' && (
+            <>
+              <OrdersDialog language={language} />
+              <ShippingSettingsDialog language={language} />
+            </>
+          )}
+          {/* Visible in both views: it keeps running in the background and also refreshes market prices. */}
           <DiscogsVerification language={language} onRecordsChanged={() => setRecordsVersion((version) => version + 1)} />
+          {view === 'inventory' && (
           <Dialog open={isOpen} onOpenChange={(open) => {
             setIsOpen(open)
             if (!open) {
@@ -237,6 +255,7 @@ export default function AdminPage() {
               )}
             </DialogContent>
           </Dialog>
+          )}
           <Dialog open={isPhotoImportOpen} onOpenChange={setIsPhotoImportOpen}>
             <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
               <DialogHeader>
@@ -251,7 +270,7 @@ export default function AdminPage() {
           </Dialog>
         </div>
       </header>
-      <DataTable language={language} recordsVersion={recordsVersion} />
+      <DataTable language={language} recordsVersion={recordsVersion} view={view} />
     </div>
   )
 }

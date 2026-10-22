@@ -18,6 +18,9 @@ export type DiscogsRelease = {
   thumbnail: string
   url: string
   lowestPrice?: number | null
+  /** Discogs price suggestion for the record's condition (see pickMarketPrice). */
+  marketPrice?: number | null
+  marketCondition?: string | null
   priceCurrency?: string
   listingsCount?: number | null
   /** Catalog-number search only: 0 exact, 1 prefix, 2 contains, 3 approximate (typo). */
@@ -32,6 +35,41 @@ export type DiscogsPriceStats = {
   lowestPrice: number | null
   currency: string
   listingsCount: number | null
+  /** Discogs price suggestion per media condition code (M, NM, VG+, ...); null when unavailable. */
+  suggestions?: Record<string, { value: number; currency: string }> | null
+}
+
+export type DiscogsMarketPrice = {
+  price: number | null
+  currency: string | null
+  /** Condition the price is for (the record's own condition, or VG+ as fallback). */
+  condition: string | null
+  numForSale: number | null
+}
+
+const FALLBACK_MARKET_CONDITION = 'VG+'
+
+/** Market price for a record: Discogs' suggestion for its media condition, VG+ when it has none. */
+export function pickMarketPrice(stats: DiscogsPriceStats, mediaCondition: string | null | undefined): DiscogsMarketPrice {
+  const condition = mediaCondition && stats.suggestions?.[mediaCondition] ? mediaCondition : FALLBACK_MARKET_CONDITION
+  const suggestion = stats.suggestions?.[condition]
+  return {
+    price: suggestion?.value ?? null,
+    currency: suggestion?.currency ?? null,
+    condition: suggestion ? condition : null,
+    numForSale: stats.listingsCount,
+  }
+}
+
+/** Database columns for a market price lookup. */
+export function marketPriceColumns(market: DiscogsMarketPrice) {
+  return {
+    discogs_market_price: market.price,
+    discogs_market_currency: market.currency,
+    discogs_market_condition: market.condition,
+    discogs_num_for_sale: market.numForSale,
+    discogs_market_checked_at: new Date().toISOString(),
+  }
 }
 
 export type DiscogsSearchFilters = {
@@ -169,7 +207,7 @@ export async function searchDiscogsByCatalogNumber(catalogNumber: string, artist
       || countryRank(left.country) - countryRank(right.country))
 }
 
-export async function getDiscogsLowestPrice(releaseId: number): Promise<DiscogsPriceStats> {
+export async function getDiscogsMarketStats(releaseId: number): Promise<DiscogsPriceStats> {
   const { data, error } = await supabase.functions.invoke<DiscogsPriceStats>(
     'discogs-search',
     { body: { priceReleaseId: releaseId } },
@@ -183,7 +221,7 @@ export async function getDiscogsLowestPrice(releaseId: number): Promise<DiscogsP
     throw new Error(error.message)
   }
 
-  return data ?? { lowestPrice: null, currency: 'USD', listingsCount: null }
+  return data ?? { lowestPrice: null, currency: 'USD', listingsCount: null, suggestions: null }
 }
 
 export type DiscogsSyncResult = {

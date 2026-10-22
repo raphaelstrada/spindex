@@ -183,6 +183,40 @@ function toRelease(release: DiscogsResult, fallbackArtist: string) {
   }
 }
 
+// Discogs grading names -> the condition codes used by the app (media_condition).
+const CONDITION_CODES: Record<string, string> = {
+  'Mint (M)': 'M',
+  'Near Mint (NM or M-)': 'NM',
+  'Very Good Plus (VG+)': 'VG+',
+  'Very Good (VG)': 'VG',
+  'Good Plus (G+)': 'G+',
+  'Good (G)': 'G',
+  'Fair (F)': 'F',
+  'Poor (P)': 'P',
+}
+
+/**
+ * Discogs' price suggestion per condition, based on its sales history (so 1/500 outlier listings
+ * do not skew it). Needs the token's account to have seller settings; otherwise returns null.
+ */
+async function fetchPriceSuggestions(releaseId: number, headers: Record<string, string>) {
+  const response = await fetch(`https://api.discogs.com/marketplace/price_suggestions/${releaseId}`, { headers })
+  if (!response.ok) {
+    console.warn(`Discogs price suggestions returned HTTP ${response.status} for release ${releaseId}.`)
+    await response.body?.cancel()
+    return null
+  }
+  const payload = await response.json() as Record<string, { value?: number; currency?: string }>
+  const suggestions: Record<string, { value: number; currency: string }> = {}
+  for (const [name, suggestion] of Object.entries(payload ?? {})) {
+    const code = CONDITION_CODES[name]
+    if (code && typeof suggestion?.value === 'number' && Number.isFinite(suggestion.value)) {
+      suggestions[code] = { value: Math.round(suggestion.value * 100) / 100, currency: suggestion.currency ?? 'USD' }
+    }
+  }
+  return Object.keys(suggestions).length ? suggestions : null
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -266,6 +300,7 @@ Deno.serve(async (request) => {
         lowestPrice,
         currency: stats.lowest_price?.currency ?? 'USD',
         listingsCount: typeof stats.num_for_sale === 'number' ? stats.num_for_sale : null,
+        suggestions: await fetchPriceSuggestions(priceReleaseId, discogsHeaders),
       })
     }
 

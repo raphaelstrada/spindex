@@ -141,7 +141,9 @@ begin
     select 1 from information_schema.columns
     where table_schema = 'public' and table_name = 'public_catalog'
       and column_name in ('notes', 'source_url', 'discogs_synced_at', 'discogs_lowest_price',
-                          'price_on_discogs', 'marketplace_price', 'marketplace_currency')
+                          'price_on_discogs', 'marketplace_price', 'marketplace_currency',
+                          'discogs_market_price', 'discogs_market_currency', 'discogs_num_for_sale', 'discogs_market_condition',
+                          'discogs_market_checked_at')
   ) then
     raise exception 'FAIL: public_catalog exposes a private column';
   end if;

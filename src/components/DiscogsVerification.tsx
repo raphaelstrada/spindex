@@ -44,7 +44,7 @@ function FieldValue({ field, value, alt }: { field: string; value: unknown; alt:
 export function DiscogsVerification({ language, onRecordsChanged }: { language: Language; onRecordsChanged: () => void }) {
   const t = translations[language].discogsCheck
   const owner = useCollectionOwner()
-  const verification = useDiscogsVerification(owner)
+  const verification = useDiscogsVerification(owner, onRecordsChanged)
   const [isStarting, setIsStarting] = useState(false)
   const [listOpen, setListOpen] = useState(false)
   const [reviewing, setReviewing] = useState<DiscogsConflict | null>(null)
@@ -273,6 +273,20 @@ function ConflictReviewDialog({ language, conflict, onClose, onResolved }: {
               <ExternalLink className="h-3 w-3" aria-hidden="true" />
             </a>
           </DialogDescription>
+          {/* Saved during the verification; conflicts stored before market prices existed have none. */}
+          {conflict.market && (conflict.market.price !== null || conflict.market.numForSale !== null) && (
+            <p className="text-sm text-muted-foreground">
+              {[
+                conflict.market.price !== null && t.marketPrice
+                  .replace('{condition}', conflict.market.condition ?? 'VG+')
+                  .replace('{price}', new Intl.NumberFormat(language === 'pt' ? 'pt-BR' : 'en-US', {
+                    style: 'currency',
+                    currency: conflict.market.currency || 'USD',
+                  }).format(conflict.market.price)),
+                conflict.market.numForSale !== null && translations[language].table.forSale.replace('{count}', String(conflict.market.numForSale)),
+              ].filter(Boolean).join(' · ')}
+            </p>
+          )}
         </DialogHeader>
 
         {loadError ? (

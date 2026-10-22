@@ -22,9 +22,16 @@ export type VinylRecord = {
   sell_possibility?: boolean | null
   sold?: boolean | null
   discogs_lowest_price?: number | null
+  discogs_market_price?: number | null
+  discogs_market_currency?: string | null
+  discogs_market_condition?: string | null
+  discogs_num_for_sale?: number | null
+  discogs_market_checked_at?: string | null
   price_on_discogs?: number | null
   discogs_synced_at?: string | null
   marketplace_price?: number | null
+  /** Computed by record_sale_price_cad (the store price), read-only. */
+  sale_price_cad?: number | null
   marketplace_currency?: string | null
   notes?: string | null
   discogs_link?: string | null

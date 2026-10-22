@@ -56,32 +56,47 @@ import {
 } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
 import { useCollectionOwner } from '@/lib/collection'
-import { getDiscogsLowestPrice, getDiscogsReleaseId, getDiscogsTokenProblem, migrateLegacyDiscogsToken, saveDiscogsToken, searchDiscogsReleases, syncRecordsToDiscogs, type DiscogsSyncResult } from '@/lib/discogs'
+import { getDiscogsMarketStats, getDiscogsReleaseId, marketPriceColumns, pickMarketPrice, getDiscogsTokenProblem, migrateLegacyDiscogsToken, saveDiscogsToken, searchDiscogsReleases, syncRecordsToDiscogs, type DiscogsSyncResult } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 
 const visibleRecordFields = new Set([
   'image_url', 'original_image_url', 'artist', 'title', 'year_pressed', 'catalog_number', 'country_pressed',
-  'discogs_lowest_price', 'marketplace_price', 'marketplace_currency',
+  'discogs_market_price', 'discogs_market_currency', 'discogs_market_condition', 'discogs_num_for_sale',
+  'marketplace_price', 'marketplace_currency', 'sale_price_cad',
 ])
 const recordFilterFields: string[] = [
   'id', 'artist', 'title', 'year_pressed', 'catalog_number', 'genre', 'image_url', 'original_image_url', 'source_url',
   'record_label', 'sub_genre', 'record_type', 'record_size', 'country_pressed',
   'media_condition', 'sleeve_condition', 'is_original', 'is_special_edition',
-  'special_edition_reason', 'sell_possibility', 'sold', 'discogs_lowest_price', 'marketplace_price', 'marketplace_currency',
+  'special_edition_reason', 'sell_possibility', 'sold', 'discogs_market_price', 'discogs_num_for_sale', 'marketplace_price', 'marketplace_currency',
   'notes', 'discogs_link',
 ]
 const dropdownFilterFields = new Set([
   'artist', 'title', 'year_pressed', 'genre', 'record_label',
   'sub_genre', 'country_pressed', 'media_condition', 'sleeve_condition',
 ])
-const compactColumns = new Set(['discogs_lowest_price', 'marketplace_price', 'price_on_discogs'])
+const compactColumns = new Set(['discogs_market_price', 'marketplace_price', 'price_on_discogs', 'sale_price_cad'])
 const autocompleteFilterFields = new Set(['artist', 'title'])
 
-// Mirrors the public_catalog filter; only drives a non-blocking hero warning.
+// Mirrors the public_catalog filter; only drives non-blocking warnings.
 function isHiddenFromStore(record: VinylRecord) {
-  return Boolean(record.sold) || !record.sell_possibility
-    || (record.marketplace_price == null && record.price_on_discogs == null)
+  return storeExclusion(record) !== null
+}
+
+function storeExclusion(record: VinylRecord): 'sold' | 'notForSale' | 'noPrice' | null {
+  if (record.sold) return 'sold'
+  if (!record.sell_possibility) return 'notForSale'
+  if (record.marketplace_price == null && record.price_on_discogs == null) return 'noPrice'
+  return null
+}
+
+export type AdminView = 'inventory' | 'sales'
+
+// Columns each admin view hides (created_at is only used as the default sort).
+const hiddenColumnsByView: Record<AdminView, string[]> = {
+  inventory: ['created_at', 'selectUnpriced', 'discogs_market_price', 'marketplace_price', 'price_on_discogs', 'sale_price_cad', 'storeStatus'],
+  sales: ['created_at', 'year_pressed', 'country_pressed', 'discogsSync'],
 }
 
 function searchableValue(value: unknown, language: Language) {
@@ -102,7 +117,7 @@ function matchesGlobalSearch(record: VinylRecord, query: string) {
 }
 
 function hasNoDiscogsPrice(record: VinylRecord) {
-  return record.discogs_lowest_price === null || record.discogs_lowest_price === undefined
+  return record.discogs_market_price === null || record.discogs_market_price === undefined
 }
 
 function formatMarketplacePrice(price: number, currency: string | null | undefined, language: Language) {
@@ -117,7 +132,7 @@ function formatMarketplacePrice(price: number, currency: string | null | undefin
   }
 }
 
-export function DataTable({ language, recordsVersion }: { language: Language; recordsVersion: number }) {
+export function DataTable({ language, recordsVersion, view }: { language: Language; recordsVersion: number; view: AdminView }) {
   const owner = useCollectionOwner()
   const [data, setData] = useState<VinylRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -227,7 +242,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         for (;;) {
           const { data: records, error } = await supabase
             .from('vinyl_records')
-            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, price_on_discogs, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
+            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_market_price, discogs_market_currency, discogs_market_condition, discogs_num_for_sale, price_on_discogs, sale_price_cad:record_sale_price_cad, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
             .eq('collection_owner', owner)
             .order('created_at', { ascending: false })
             .order('id', { ascending: true })
@@ -339,20 +354,33 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
 
     if (!releaseId) return 'no-release'
 
-    const stats = await getDiscogsLowestPrice(releaseId)
-    if (stats.lowestPrice === null) return 'no-price'
+    const market = pickMarketPrice(await getDiscogsMarketStats(releaseId), record.media_condition)
+    // Without a suggestion, keep the previous market price and only refresh the copies for sale.
+    const changes = market.price === null ? { discogs_num_for_sale: market.numForSale } : marketPriceColumns(market)
 
     const { error } = await supabase
       .from('vinyl_records')
-      .update({ discogs_lowest_price: stats.lowestPrice })
+      .update(changes)
       .eq('id', record.id)
 
     if (error) throw new Error(error.message)
 
     setData((current) => current.map((item) =>
-      item.id === record.id ? { ...item, discogs_lowest_price: stats.lowestPrice } : item,
+      item.id === record.id ? { ...item, ...changes } : item,
     ))
-    return 'updated'
+    return market.price === null ? 'no-price' : 'updated'
+  }
+
+  // The store price is computed by the database (record_sale_price_cad); re-read it after an edit.
+  async function refreshSalePrice(recordId: string) {
+    const { data: row, error } = await supabase
+      .from('vinyl_records')
+      .select('sale_price_cad:record_sale_price_cad')
+      .eq('id', recordId)
+      .maybeSingle()
+    if (error || !row) return
+    const salePrice = (row as { sale_price_cad: number | null }).sale_price_cad
+    setData((current) => current.map((item) => item.id === recordId ? { ...item, sale_price_cad: salePrice } : item))
   }
 
   async function autoFillDiscogsPrice(record: VinylRecord) {
@@ -878,6 +906,11 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
     },
     { accessorKey: 'country_pressed', header: t.country },
     {
+      accessorKey: 'media_condition',
+      header: t.detailLabels.media_condition,
+      cell: ({ row }) => row.original.media_condition || '-',
+    },
+    {
       id: 'selectUnpriced',
       header: () => (
         <Checkbox
@@ -915,10 +948,14 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       },
     },
     {
-      accessorKey: 'discogs_lowest_price',
-      header: t.discogsLowestPrice,
+      accessorKey: 'discogs_market_price',
+      header: t.discogsMarketPrice,
       cell: ({ row }) => {
-        const price = row.original.discogs_lowest_price
+        const record = row.original
+        const price = record.discogs_market_price
+        const forSale = record.discogs_num_for_sale == null
+          ? null
+          : <span className="block text-xs text-muted-foreground">{t.forSale.replace('{count}', String(record.discogs_num_for_sale))}</span>
         if (price === null || price === undefined) {
           const isLoadingPrice = pendingPriceId === row.original.id
           return (
@@ -936,10 +973,13 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
             </Button>
           )
         }
-        return new Intl.NumberFormat(language === 'pt' ? 'pt-BR' : 'en-US', {
-              style: 'currency',
-              currency: 'USD',
-            }).format(price)
+        return (
+          <span title={t.discogsMarketPriceHint}>
+            {formatMarketplacePrice(price, record.discogs_market_currency || 'USD', language)}
+            {record.discogs_market_condition && <span className="ml-1 text-xs text-muted-foreground">{record.discogs_market_condition}</span>}
+            {forSale}
+          </span>
+        )
       },
     },
     {
@@ -963,6 +1003,31 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
               style: 'currency',
               currency: 'USD',
             }).format(price)
+      },
+    },
+    {
+      accessorKey: 'sale_price_cad',
+      header: t.salePriceCad,
+      cell: ({ row }) => {
+        const price = row.original.sale_price_cad
+        return price === null || price === undefined ? '-' : formatMarketplacePrice(price, 'CAD', language)
+      },
+    },
+    {
+      id: 'storeStatus',
+      header: t.storeStatus,
+      accessorFn: (record) => storeExclusion(record) ?? '',
+      cell: ({ row }) => {
+        const exclusion = storeExclusion(row.original)
+        if (!exclusion) {
+          return <span className="whitespace-nowrap rounded bg-brand-green/15 px-1.5 py-0.5 text-xs font-medium text-brand-green">{t.inStore}</span>
+        }
+        const labels = { sold: t.notInStoreSold, notForSale: t.notInStoreNotForSale, noPrice: t.notInStoreNoPrice }
+        return (
+          <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${exclusion === 'noPrice' ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400' : 'bg-muted text-muted-foreground'}`}>
+            {labels[exclusion]}
+          </span>
+        )
       },
     },
     {
@@ -1178,7 +1243,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
   const table = useReactTable({
     data: filteredData,
     columns,
-    state: { sorting, expanded, pagination, columnVisibility: { created_at: false } },
+    state: { sorting, expanded, pagination, columnVisibility: Object.fromEntries(hiddenColumnsByView[view].map((id) => [id, false])) },
     onSortingChange: setSorting,
     onExpandedChange: setExpanded,
     onPaginationChange: setPagination,
@@ -1291,7 +1356,16 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
         </details>
       </div>
 
-      {(selectedUnpricedRecords.length > 0 || isBatchPriceLoading) && (
+      {view === 'sales' && (
+        <p className="mb-3 text-sm text-muted-foreground" role="status">
+          {t.salesSummary
+            .replace('{inStore}', String(data.filter((record) => storeExclusion(record) === null).length))
+            .replace('{sold}', String(data.filter((record) => record.sold).length))
+            .replace('{noPrice}', String(data.filter((record) => storeExclusion(record) === 'noPrice').length))}
+        </p>
+      )}
+
+      {view === 'sales' && (selectedUnpricedRecords.length > 0 || isBatchPriceLoading) && (
         <div className="mb-3 flex flex-col gap-3 rounded-md border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
             {isBatchPriceLoading && batchPriceProgress
@@ -1320,7 +1394,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
       )}
       {batchPriceSummary && <p className="mb-3 text-sm text-muted-foreground" role="status">{batchPriceSummary}</p>}
 
-      <div className="mb-3 flex justify-end">
+      {view === 'inventory' && <div className="mb-3 flex justify-end">
         <Button
           type="button"
           variant="outline"
@@ -1329,9 +1403,9 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           <Disc3 aria-hidden="true" />
           {translations[language].app.batchDiscogsSync}
         </Button>
-      </div>
+      </div>}
 
-      {(selectedSyncIds.size > 0 || isSyncLoading) && (
+      {view === 'inventory' && (selectedSyncIds.size > 0 || isSyncLoading) && (
         <div className="mb-3 flex flex-col gap-3 rounded-md border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <Checkbox
@@ -1461,7 +1535,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
           <TableBody>
             {table.getRowModel().rows.length ? (
               table.getRowModel().rows.map((row) => {
-                const missingDiscogsLink = !getDiscogsReleaseId(row.original.discogs_link)
+                const missingDiscogsLink = view === 'inventory' && !getDiscogsReleaseId(row.original.discogs_link)
                 const rowClass = [
                   row.original.sold ? 'opacity-50' : '',
                   missingDiscogsLink ? 'bg-amber-500/10' : '',
@@ -1606,6 +1680,7 @@ export function DataTable({ language, recordsVersion }: { language: Language; re
                     : item,
                 ))
                 setEditingRecord(null)
+                void refreshSalePrice(previous.id)
                 if (releaseChanged) void mirrorReleaseChangeToDiscogs(previous.id, oldReleaseId, newReleaseId)
               }}
             />

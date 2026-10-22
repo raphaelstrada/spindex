@@ -5,7 +5,7 @@ import * as z from 'zod'
 import { AlertCircle, ArrowRight, Hash, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useCollectionOwner, type CollectionOwner } from '@/lib/collection'
-import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsByCatalogNumber, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
+import { getDiscogsMarketStats, getDiscogsReleaseId, marketPriceColumns, pickMarketPrice, searchDiscogsByCatalogNumber, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import { DiscogsCandidatePicker } from '@/components/DiscogsCandidatePicker'
 import { Button } from '@/components/ui/button'
 import {
@@ -106,7 +106,7 @@ function createFormSchema(language: Language) {
     sold: z.boolean().default(false),
     is_hero: z.boolean().default(false),
     hero_tagline: z.string().max(90, t.heroTaglineTooLong).optional(),
-    discogs_lowest_price: z.coerce.number().nonnegative().optional(),
+    discogs_market_price: z.coerce.number().nonnegative().optional(),
     marketplace_price: z.preprocess(
       (value) => value === '' || value === null ? undefined : value,
       z.coerce.number().nonnegative().optional(),
@@ -197,7 +197,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       sold: record?.sold ?? false,
       is_hero: record?.is_hero === true,
       hero_tagline: typeof record?.hero_tagline === 'string' ? record.hero_tagline : '',
-      discogs_lowest_price: record?.discogs_lowest_price ?? initialValues?.discogs_lowest_price ?? undefined,
+      discogs_market_price: record?.discogs_market_price ?? initialValues?.discogs_market_price ?? undefined,
       marketplace_price: record?.marketplace_price ?? initialValues?.marketplace_price ?? undefined,
       marketplace_currency: record?.marketplace_currency ?? initialValues?.marketplace_currency ?? '',
       notes: record?.notes ?? initialValues?.notes ?? '',
@@ -227,14 +227,20 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   }
 
   async function proceedWithSave(values: FormValues) {
-    let discogsLowestPrice = values.discogs_lowest_price
+    let discogsMarketPrice = values.discogs_market_price
+    // Market details saved next to the price (currency, condition, copies for sale, check date).
+    let marketDetails: Partial<Omit<ReturnType<typeof marketPriceColumns>, 'discogs_market_price'>> = {}
     const associatedReleaseId = selectedDiscogsRelease?.id ?? getDiscogsReleaseId(values.discogs_link)
     if (associatedReleaseId) {
       try {
-        const priceStats = await getDiscogsLowestPrice(associatedReleaseId)
-        if (priceStats.lowestPrice !== null) {
-          discogsLowestPrice = priceStats.lowestPrice
-          form.setValue('discogs_lowest_price', discogsLowestPrice, { shouldDirty: true })
+        const market = pickMarketPrice(await getDiscogsMarketStats(associatedReleaseId), values.media_condition)
+        if (market.price !== null) {
+          const { discogs_market_price: price, ...details } = marketPriceColumns(market)
+          discogsMarketPrice = price ?? undefined
+          marketDetails = details
+          form.setValue('discogs_market_price', discogsMarketPrice, { shouldDirty: true })
+        } else {
+          marketDetails = { discogs_num_for_sale: market.numForSale }
         }
       } catch {
         // Saving the record still works when the price lookup fails.
@@ -253,7 +259,8 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
 
     const valuesToSave = {
       ...values,
-      discogs_lowest_price: discogsLowestPrice,
+      ...marketDetails,
+      discogs_market_price: discogsMarketPrice,
       ...(originalImageUrl ? { original_image_url: originalImageUrl } : {}),
     }
     const releaseChanged = Boolean(record?.discogs_synced_at)
@@ -443,18 +450,20 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
 
   async function selectDiscogsRelease(release: DiscogsRelease) {
     setSelectedDiscogsTitle(release.title)
-    setSelectedDiscogsRelease({ ...release, lowestPrice: null, priceCurrency: 'USD' })
+    setSelectedDiscogsRelease({ ...release, marketPrice: null, priceCurrency: 'USD' })
     setAppliedDiscogsFields(new Set())
     setDiscogsPriceLookupComplete(false)
     setDiscogsPriceLoading(true)
     try {
-      const priceStats = await getDiscogsLowestPrice(release.id)
-        form.setValue('discogs_lowest_price', priceStats.lowestPrice ?? undefined, { 
-        shouldDirty: true,
-        shouldValidate: true,
-      })
+      const market = pickMarketPrice(await getDiscogsMarketStats(release.id), form.getValues('media_condition'))
       setSelectedDiscogsRelease((current) => current?.id === release.id
-        ? { ...current, ...priceStats }
+        ? {
+            ...current,
+            marketPrice: market.price,
+            marketCondition: market.condition,
+            priceCurrency: market.currency ?? 'USD',
+            listingsCount: market.numForSale,
+          }
         : current,
       )
       setDiscogsPriceLookupComplete(true)
@@ -551,14 +560,14 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       apply: () => form.setValue('discogs_link', selectedDiscogsRelease.url, { shouldDirty: true, shouldValidate: true }),
     },
     {
-      key: 'discogs_lowest_price',
-      label: t.discogsLowestPrice,
-      currentValue: form.getValues('discogs_lowest_price'),
-      suggestedValue: selectedDiscogsRelease.lowestPrice,
-      apply: () => form.setValue('discogs_lowest_price', selectedDiscogsRelease.lowestPrice ?? undefined, { shouldDirty: true, shouldValidate: true }),
+      key: 'discogs_market_price',
+      label: t.discogsMarketPrice.replace('{condition}', selectedDiscogsRelease.marketCondition ?? 'VG+'),
+      currentValue: form.getValues('discogs_market_price'),
+      suggestedValue: selectedDiscogsRelease.marketPrice,
+      apply: () => form.setValue('discogs_market_price', selectedDiscogsRelease.marketPrice ?? undefined, { shouldDirty: true, shouldValidate: true }),
     },
   ].filter((proposal) => {
-    if (appliedDiscogsFields.has(proposal.key) || proposal.suggestedValue === undefined || (proposal.suggestedValue === null && (proposal.key !== 'discogs_lowest_price' || !discogsPriceLookupComplete)) || proposal.suggestedValue === '') {
+    if (appliedDiscogsFields.has(proposal.key) || proposal.suggestedValue === undefined || (proposal.suggestedValue === null && (proposal.key !== 'discogs_market_price' || !discogsPriceLookupComplete)) || proposal.suggestedValue === '') {
       return false
     }
     return String(proposal.currentValue ?? '').trim() !== String(proposal.suggestedValue).trim()
@@ -573,7 +582,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     if (value === null || value === undefined || value === '') return '-'
     return new Intl.NumberFormat(language === 'pt' ? 'pt-BR' : 'en-US', {
       style: 'currency',
-      currency: 'USD',
+      currency: selectedDiscogsRelease?.priceCurrency || record?.discogs_market_currency || 'USD',
     }).format(Number(value))
   }
 
@@ -964,12 +973,15 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
           {discogsPriceLoading && (
             <p className="text-sm text-muted-foreground">{t.fetchingDiscogsPrice}</p>
           )}
-          {!discogsPriceLoading && selectedDiscogsRelease?.lowestPrice !== null && selectedDiscogsRelease?.lowestPrice !== undefined && (
+          {!discogsPriceLoading && selectedDiscogsRelease?.marketPrice !== null && selectedDiscogsRelease?.marketPrice !== undefined && (
             <p className="text-sm text-muted-foreground">
-              {t.discogsLowestPrice}: {displayDiscogsPrice(selectedDiscogsRelease.lowestPrice)}
+              {t.discogsMarketPrice.replace('{condition}', selectedDiscogsRelease.marketCondition ?? 'VG+')}: {displayDiscogsPrice(selectedDiscogsRelease.marketPrice)}
             </p>
           )}
-          {!discogsPriceLoading && discogsPriceLookupComplete && selectedDiscogsRelease?.lowestPrice === null && (
+          {!discogsPriceLoading && selectedDiscogsRelease?.listingsCount !== null && selectedDiscogsRelease?.listingsCount !== undefined && (
+            <p className="text-sm text-muted-foreground">{t.forSale.replace('{count}', String(selectedDiscogsRelease.listingsCount))}</p>
+          )}
+          {!discogsPriceLoading && discogsPriceLookupComplete && selectedDiscogsRelease?.marketPrice === null && (
             <p className="text-sm text-muted-foreground">{t.noDiscogsPrice}</p>
           )}
           {discogsProposals.length ? (
@@ -982,7 +994,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
                       proposal.currentValue ? (
                         <img src={String(proposal.currentValue)} alt={t.currentValue} className="mt-1 h-14 w-14 rounded-sm object-cover" />
                       ) : <p className="mt-1 text-sm">-</p>
-                    ) : proposal.key === 'discogs_lowest_price' ? (
+                    ) : proposal.key === 'discogs_market_price' ? (
                       <p className="break-words text-sm">{displayDiscogsPrice(proposal.currentValue)}</p>
                     ) : (
                       <p className="break-words text-sm">{displayProposalValue(proposal.currentValue)}</p>
@@ -1006,7 +1018,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
                     <p className="text-xs font-medium text-muted-foreground">{proposal.label} · {t.discogsSuggestion}</p>
                     {proposal.key === 'image_url' ? (
                       <img src={String(proposal.suggestedValue)} alt={t.discogsSuggestion} className="mt-1 h-14 w-14 rounded-sm object-cover" />
-                    ) : proposal.key === 'discogs_lowest_price' ? (
+                    ) : proposal.key === 'discogs_market_price' ? (
                       <p className="break-words text-sm">{displayDiscogsPrice(proposal.suggestedValue)}</p>
                     ) : (
                       <p className="break-words text-sm">{displayProposalValue(proposal.suggestedValue)}</p>
