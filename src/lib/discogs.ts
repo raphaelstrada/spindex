@@ -24,6 +24,8 @@ export type DiscogsRelease = {
   matchTier?: number
   /** Catalog-number search only: edit distance to the query (lower is closer). */
   matchDistance?: number
+  /** Catalog-number search with an artist hint only: same artist as the record being edited. */
+  artistMatch?: boolean
 }
 
 export type DiscogsPriceStats = {
@@ -149,18 +151,20 @@ export async function searchDiscogsByBarcode(barcode: string): Promise<DiscogsRe
  * Match quality comes first (exact, prefix, contains, typo), then closeness to what was typed,
  * then the usual pressing-country priority. All exact matches are equally close, so for them the
  * country decides. Every match is returned; the number of Discogs requests is fixed by the edge function.
+ * With an artist, releases by that artist come first (short Cat#s are shared by many labels).
  */
-export async function searchDiscogsByCatalogNumber(catalogNumber: string): Promise<DiscogsRelease[]> {
+export async function searchDiscogsByCatalogNumber(catalogNumber: string, artist?: string): Promise<DiscogsRelease[]> {
   const { data, error } = await supabase.functions.invoke<{ results: DiscogsRelease[] }>(
     'discogs-search',
-    { body: { catno: catalogNumber.trim() } },
+    { body: { catno: catalogNumber.trim(), ...(artist?.trim() ? { artist: artist.trim() } : {}) } },
   )
 
   if (error) throw await extractFunctionError(error, 'discogs-search')
   // Stable sort: inside the same tier and country group, the edge function's ranking is kept.
   return [...(data?.results ?? [])]
     .sort((left, right) =>
-      (left.matchTier ?? 0) - (right.matchTier ?? 0)
+      Number(right.artistMatch ?? false) - Number(left.artistMatch ?? false)
+      || (left.matchTier ?? 0) - (right.matchTier ?? 0)
       || (left.matchDistance ?? 0) - (right.matchDistance ?? 0)
       || countryRank(left.country) - countryRank(right.country))
 }

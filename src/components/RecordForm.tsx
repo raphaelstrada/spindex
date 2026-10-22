@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { AlertCircle, ArrowRight, Disc3, Hash, Images, LoaderCircle, Search } from 'lucide-react'
+import { AlertCircle, ArrowRight, Hash, Images, LoaderCircle, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useCollectionOwner, type CollectionOwner } from '@/lib/collection'
-import { countryRank, getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsByCatalogNumber, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
+import { getDiscogsLowestPrice, getDiscogsReleaseId, searchDiscogsByCatalogNumber, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
+import { DiscogsCandidatePicker } from '@/components/DiscogsCandidatePicker'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -137,11 +138,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const t = translations[language].form
   const owner = useCollectionOwner()
   const [discogsSearching, setDiscogsSearching] = useState(false)
-  const [discogsResults, setDiscogsResults] = useState<DiscogsRelease[]>([])
   const [discogsSearchError, setDiscogsSearchError] = useState<string | null>(null)
-  const [discogsHasSearched, setDiscogsHasSearched] = useState(false)
-  const [discogsCountryFilter, setDiscogsCountryFilter] = useState('all')
-  const [discogsYearFilter, setDiscogsYearFilter] = useState('all')
   const [discogsPriceLoading, setDiscogsPriceLoading] = useState(false)
   const [discogsPriceLookupComplete, setDiscogsPriceLookupComplete] = useState(false)
   // Manual Discogs lookup next to the artist/title search: a release URL or a (fuzzy) catalog number.
@@ -158,6 +155,15 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const [foundDuplicate, setFoundDuplicate] = useState<VinylRecord | null>(null)
   const [duplicateAcknowledged, setDuplicateAcknowledged] = useState(false)
   const duplicateCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // "Closest Discogs matches" box: filled by the Cat# / Discogs URL searches, and right away
+  // when editing a record that has a Cat# (other pressings of that Cat#).
+  const editCatalogNumber = record && !onSaveAndNext ? record.catalog_number?.trim() ?? '' : ''
+  const [pickerQuery, setPickerQuery] = useState<string | null>(editCatalogNumber || null)
+  const [pickerHint, setPickerHint] = useState<string | undefined>(undefined)
+  const [pickerCandidates, setPickerCandidates] = useState<DiscogsRelease[]>([])
+  const [pickerLoading, setPickerLoading] = useState(false)
+  const [pickerError, setPickerError] = useState<string | null>(null)
+  const pickerRequestRef = useRef(0)
 
   function skipRecord() {
     setDuplicateAcknowledged(true)
@@ -320,61 +326,70 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     await proceedWithSave(pendingFormValues)
   }
 
-  async function handleDiscogsSearch(useFilters = false) {
+  async function handleDiscogsSearch() {
     const artist = form.getValues('artist').trim()
     const title = form.getValues('title').trim()
     const releaseUrl = manualDiscogsSearch === 'url' ? discogsUrlInput.trim() : ''
     const catalogNumber = manualDiscogsSearch === 'catalogNumber' ? catalogNumberInput.trim() : ''
-    setDiscogsResults([])
     setDiscogsSearchError(null)
-    setDiscogsHasSearched(false)
     setSelectedDiscogsTitle(null)
     setSelectedDiscogsRelease(null)
     setAppliedDiscogsFields(new Set())
-
-    if (!useFilters) {
-      setDiscogsCountryFilter('all')
-      setDiscogsYearFilter('all')
-    }
 
     if (manualDiscogsSearch === 'catalogNumber') {
       if (!/[\p{L}\p{N}]/u.test(catalogNumber)) {
         setDiscogsSearchError(translations[language].app.catalogNumberInvalid)
         return
       }
-      setDiscogsSearching(true)
-      try {
-        setDiscogsResults(await searchDiscogsByCatalogNumber(catalogNumber))
-        setDiscogsHasSearched(true)
-      } catch (error) {
-        setDiscogsSearchError(error instanceof Error ? error.message : t.discogsSearchError)
-      } finally {
-        setDiscogsSearching(false)
-      }
+      await searchIntoPicker(catalogNumber, () => searchDiscogsByCatalogNumber(catalogNumber, artist), catalogNumberHint(artist))
       return
     }
 
-    if (!artist && !title && !releaseUrl) {
+    if (releaseUrl) {
+      await searchIntoPicker(releaseUrl, () => searchDiscogsReleases(artist, title, releaseUrl))
+      return
+    }
+
+    if (!artist && !title) {
       setDiscogsSearchError(t.discogsSearchRequired)
       return
     }
 
+    await searchIntoPicker([artist, title].filter(Boolean).join(' - '), () => searchDiscogsReleases(artist, title))
+  }
+
+  function catalogNumberHint(artist: string) {
+    return artist ? translations[language].app.catalogNumberArtistHint : translations[language].app.catalogNumberHint
+  }
+
+  async function searchIntoPicker(query: string, search: () => Promise<DiscogsRelease[]>, hint?: string) {
+    // Only the latest search may fill the box.
+    const requestId = ++pickerRequestRef.current
+    setPickerQuery(query)
+    setPickerHint(hint)
+    setPickerCandidates([])
+    setPickerError(null)
+    setPickerLoading(true)
     setDiscogsSearching(true)
     try {
-      const filters = useFilters && !releaseUrl
-        ? {
-            country: discogsCountryFilter === 'all' ? undefined : discogsCountryFilter,
-            year: discogsYearFilter === 'all' ? undefined : Number(discogsYearFilter),
-          }
-        : undefined
-      setDiscogsResults(await searchDiscogsReleases(artist, title, releaseUrl || undefined, filters))
-      setDiscogsHasSearched(true)
+      const results = await search()
+      if (requestId === pickerRequestRef.current) setPickerCandidates(results)
     } catch (error) {
-      setDiscogsSearchError(error instanceof Error ? error.message : t.discogsSearchError)
+      if (requestId === pickerRequestRef.current) setPickerError(error instanceof Error ? error.message : t.discogsSearchError)
     } finally {
-      setDiscogsSearching(false)
+      if (requestId === pickerRequestRef.current) {
+        setPickerLoading(false)
+        setDiscogsSearching(false)
+      }
     }
   }
+
+  useEffect(() => {
+    if (!editCatalogNumber) return
+    const artist = record?.artist?.trim() ?? ''
+    void searchIntoPicker(editCatalogNumber, () => searchDiscogsByCatalogNumber(editCatalogNumber, artist), catalogNumberHint(artist))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editCatalogNumber])
 
   // When opened after a failed auto-fill, search Discogs suggestions right away.
   const autoSearchTriggered = useRef(false)
@@ -388,6 +403,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const watchedArtist = form.watch('artist')
   const watchedTitle = form.watch('title')
   const watchedIsHero = form.watch('is_hero')
+  const watchedDiscogsReleaseId = getDiscogsReleaseId(form.watch('discogs_link'))
   const watchedMarketplacePrice = form.watch('marketplace_price')
   // Mirrors the public_catalog filter; only drives a non-blocking warning.
   const heroHiddenFromStore = form.watch('sold')
@@ -429,7 +445,6 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     setSelectedDiscogsTitle(release.title)
     setSelectedDiscogsRelease({ ...release, lowestPrice: null, priceCurrency: 'USD' })
     setAppliedDiscogsFields(new Set())
-    setDiscogsResults([])
     setDiscogsPriceLookupComplete(false)
     setDiscogsPriceLoading(true)
     try {
@@ -562,23 +577,6 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     }).format(Number(value))
   }
 
-  const discogsCountries = [...new Set(discogsResults.map((release) => release.country).filter((country): country is string => Boolean(country)))]
-    .sort((left, right) => countryRank(left) - countryRank(right) || left.localeCompare(right))
-  const discogsYears = [...new Set(discogsResults.map((release) => release.year).filter((year): year is number => year !== null))]
-    .sort((left, right) => right - left)
-  // Pressing-country priority: Canada, Brazil, US, Europe, others (see countryRank).
-  // Catalog-number results keep match quality (exact first, then closest) ahead of the country.
-  const filteredDiscogsResults = discogsResults
-    .filter((release) =>
-      (discogsCountryFilter === 'all' || release.country === discogsCountryFilter)
-      && (discogsYearFilter === 'all' || String(release.year) === discogsYearFilter),
-    )
-    .sort((left, right) =>
-      (left.matchTier ?? 0) - (right.matchTier ?? 0)
-      || (left.matchDistance ?? 0) - (right.matchDistance ?? 0)
-      || countryRank(left.country) - countryRank(right.country))
-  const hasDiscogsFilters = discogsCountryFilter !== 'all' || discogsYearFilter !== 'all'
-
   return (
     <>
       <Dialog open={existingDuplicate !== null && !record && !duplicateAcknowledged} onOpenChange={(open) => {
@@ -707,6 +705,26 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
             </Button>
           )}
         </div>
+        {pickerQuery && (
+          <div className="rounded-md border p-3">
+            <DiscogsCandidatePicker
+              key={pickerQuery}
+              language={language}
+              title={translations[language].app.catalogNumberResults.replace('{catno}', pickerQuery)}
+              hint={pickerHint}
+              error={pickerError}
+              isLoading={pickerLoading}
+              loadingLabel={translations[language].app.barcodeSearching}
+              candidates={pickerCandidates}
+              selectedId={selectedDiscogsRelease ? String(selectedDiscogsRelease.id) : watchedDiscogsReleaseId ? String(watchedDiscogsReleaseId) : null}
+              emptyMessage={t.noDiscogsMatches}
+              onSelect={(releaseId) => {
+                const release = pickerCandidates.find((candidate) => String(candidate.id) === releaseId)
+                if (release) void selectDiscogsRelease(release)
+              }}
+            />
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField control={form.control} name="artist" render={({ field }) => (
             <FormItem><FormLabel>{t.artist}</FormLabel><FormControl><Input placeholder={t.artistPlaceholder} {...field} /></FormControl><FormMessage /></FormItem>
@@ -738,84 +756,6 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
             <p role="alert" className="text-sm text-destructive">
               {discogsSearchError}
             </p>
-          )}
-          {discogsHasSearched && discogsResults.length === 0 && !discogsSearchError && (
-            <p className="text-sm text-muted-foreground">{t.noDiscogsMatches}</p>
-          )}
-          {discogsResults.length > 1 && (
-            <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-              <div className="space-y-2">
-                <Label htmlFor="discogs-country-filter">{t.filterCountry}</Label>
-                <Select value={discogsCountryFilter} onValueChange={setDiscogsCountryFilter}>
-                  <SelectTrigger id="discogs-country-filter"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t.allCountries}</SelectItem>
-                    {discogsCountries.map((country) => (
-                      <SelectItem key={country} value={country}>{country}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="discogs-year-filter">{t.filterYear}</Label>
-                <Select value={discogsYearFilter} onValueChange={setDiscogsYearFilter}>
-                  <SelectTrigger id="discogs-year-filter"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t.allYears}</SelectItem>
-                    {discogsYears.map((year) => (
-                      <SelectItem key={year} value={String(year)}>{year}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {hasDiscogsFilters && manualDiscogsSearch !== 'catalogNumber' && !(manualDiscogsSearch === 'url' && discogsUrlInput.trim()) && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void handleDiscogsSearch(true)}
-                  disabled={discogsSearching}
-                >
-                  {discogsSearching ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Search aria-hidden="true" />}
-                  {t.searchDiscogsWithFilters}
-                </Button>
-              )}
-            </div>
-          )}
-          {discogsResults.length > 0 && filteredDiscogsResults.length === 0 && (
-            <p className="text-sm text-muted-foreground">{t.noFilteredDiscogsMatches}</p>
-          )}
-          {filteredDiscogsResults.length > 0 && (
-            <section aria-label={t.discogsMatches} className="space-y-2">
-              <h3 className="text-sm font-medium">{t.discogsMatches}</h3>
-              <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
-                {filteredDiscogsResults.map((release) => (
-                  <button
-                    key={release.id}
-                    type="button"
-                    className="flex min-w-0 items-center gap-3 rounded-md border p-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label={`${t.selectDiscogsRelease}: ${release.title}`}
-                    onClick={() => selectDiscogsRelease(release)}
-                  >
-                    <img
-                      src={release.thumbnail}
-                      alt=""
-                      className="h-14 w-14 shrink-0 rounded-sm object-cover"
-                      loading="lazy"
-                    />
-                    <span className="min-w-0">
-                      <span className="block line-clamp-2 text-sm font-medium">{release.title}</span>
-                      {release.catalogNumber && <span className="mt-1 inline-block rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs font-semibold text-primary">{release.catalogNumber}</span>}
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        {[release.year, release.country, release.format.join(', '), release.label[0]]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                    </span>
-                    <Disc3 className="ml-auto h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  </button>
-                ))}
-              </div>
-            </section>
           )}
         </div>
 

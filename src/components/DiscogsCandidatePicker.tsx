@@ -37,11 +37,11 @@ export function DiscogsCandidatePicker({
   candidates: DiscogsRelease[]
   selectedId: string | null
   emptyMessage: string
-  actionLabel: string
+  actionLabel?: string
   actionActive?: boolean
   actionDisabled?: boolean
   onSelect: (releaseId: string) => void
-  onAction: () => void
+  onAction?: () => void
 }) {
   const t = translations[language].form
   const [countryFilter, setCountryFilter] = useState('all')
@@ -161,15 +161,17 @@ export function DiscogsCandidatePicker({
         <p className="text-sm text-muted-foreground">{emptyMessage}</p>
       )}
 
-      <Button
-        type="button"
-        variant={actionActive ? 'secondary' : 'outline'}
-        size="sm"
-        disabled={actionDisabled || isLoading}
-        onClick={onAction}
-      >
-        {actionLabel}
-      </Button>
+      {actionLabel && onAction && (
+        <Button
+          type="button"
+          variant={actionActive ? 'secondary' : 'outline'}
+          size="sm"
+          disabled={actionDisabled || isLoading}
+          onClick={onAction}
+        >
+          {actionLabel}
+        </Button>
+      )}
     </section>
   )
 }

@@ -54,6 +54,12 @@ const MAX_SEARCH_PAGES = 20
 // Extra Discogs requests for the typo round (Discogs allows 60 authenticated requests per minute).
 const MAX_TYPO_QUERIES = 8
 
+/** Accent/case-insensitive artist key; drops Discogs disambiguation like "(2)" and "*". */
+function normalizeArtist(value: string) {
+  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    .replace(/\(\d+\)/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+}
+
 /** Lowercase, alphanumerics only: "SMAS-3375", "smas 3375" and "SMAS3375" compare equal. */
 function normalizeCatno(value: string) {
   return value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
@@ -327,11 +333,12 @@ Deno.serve(async (request) => {
     }
 
     if (catno) {
-      const searchVariant = async (param: 'catno' | 'q', value: string) => {
+      const searchVariant = async (param: 'catno' | 'q', value: string, artistHint = '') => {
         const url = new URL('https://api.discogs.com/database/search')
         url.searchParams.set('type', 'release')
         url.searchParams.set('format', 'Vinyl')
         url.searchParams.set(param, value)
+        if (artistHint) url.searchParams.set('artist', artistHint)
         url.searchParams.set('per_page', '100')
         const response = await fetch(url, { headers: discogsHeaders })
         if (!response.ok) {
@@ -345,6 +352,9 @@ Deno.serve(async (request) => {
       const responses = await Promise.all([
         ...catnoQueryVariants(catno).map((variant) => searchVariant('catno', variant)),
         searchVariant('q', catno),
+        // Short Cat#s (e.g. "1403") are shared by hundreds of releases and the 100 results of a plain
+        // search may not include the right one. When the artist is known, ask for it explicitly too.
+        ...(artist ? [searchVariant('catno', catno, artist)] : []),
       ])
 
       const hasExactMatch = responses.some((response) =>
@@ -363,15 +373,22 @@ Deno.serve(async (request) => {
         return jsonResponse({ error: `Discogs returned HTTP ${status}.` }, status)
       }
 
+      const artistKey = normalizeArtist(artist)
       const ranked = [...new Map(responses.flatMap((response) => response.results).map((release) => [release.id, release])).values()]
         .filter((release) => release.cover_image || release.thumb)
-        .map((release, order) => ({ release, order, rank: catnoMatchRank(catno, release.catno) }))
+        .map((release, order) => {
+          const candidate = toRelease(release, '')
+          const candidateKey = normalizeArtist(candidate.artist)
+          const artistMatch = Boolean(artistKey && candidateKey && (candidateKey.includes(artistKey) || artistKey.includes(candidateKey)))
+          return { candidate, artistMatch, order, rank: catnoMatchRank(catno, release.catno) }
+        })
         .filter((item): item is typeof item & { rank: [number, number] } => item.rank !== null)
-        // Exact first, then prefix, contains and typo matches; Discogs relevance breaks ties.
-        .sort((left, right) => left.rank[0] - right.rank[0] || left.rank[1] - right.rank[1] || left.order - right.order)
+        // Same artist first, then exact, prefix, contains and typo matches; Discogs relevance breaks ties.
+        .sort((left, right) => Number(right.artistMatch) - Number(left.artistMatch)
+          || left.rank[0] - right.rank[0] || left.rank[1] - right.rank[1] || left.order - right.order)
 
       return jsonResponse({
-        results: ranked.map(({ release, rank }) => ({ ...toRelease(release, ''), matchTier: rank[0], matchDistance: rank[1] })),
+        results: ranked.map(({ candidate, artistMatch, rank }) => ({ ...candidate, artistMatch, matchTier: rank[0], matchDistance: rank[1] })),
       })
     }
 
