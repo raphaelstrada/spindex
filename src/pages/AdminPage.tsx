@@ -6,6 +6,7 @@ import { BarcodeScanner } from '@/components/BarcodeScanner'
 import { BarcodeRecordImport } from '@/components/BarcodeRecordImport'
 import { CatalogNumberRecordImport } from '@/components/CatalogNumberRecordImport'
 import { DataTable } from '@/components/DataTable'
+import { DiscogsVerification } from '@/components/DiscogsVerification'
 import { OrdersDialog } from '@/components/OrdersDialog'
 import { ShippingSettingsDialog } from '@/components/ShippingSettingsDialog'
 import { Button } from '@/components/ui/button'
@@ -70,7 +71,7 @@ export default function AdminPage() {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{t.app.description}</p>
         </div>
-        <div className="flex items-center justify-between gap-3 sm:justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-3 sm:justify-end">
           <Button
             variant="outline"
             size="icon"
@@ -118,6 +119,7 @@ export default function AdminPage() {
           </Button>
           <OrdersDialog language={language} />
           <ShippingSettingsDialog language={language} />
+          <DiscogsVerification language={language} onRecordsChanged={() => setRecordsVersion((version) => version + 1)} />
           <Dialog open={isOpen} onOpenChange={(open) => {
             setIsOpen(open)
             if (!open) {
