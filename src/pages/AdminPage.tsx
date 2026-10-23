@@ -135,7 +135,7 @@ export default function AdminPage() {
               <ShippingSettingsDialog language={language} />
             </>
           )}
-          {/* Visible in both views: it keeps running in the background and also refreshes market prices. */}
+          {/* Visible in both views so the background verification keeps running when the view changes. */}
           <DiscogsVerification language={language} onRecordsChanged={() => setRecordsVersion((version) => version + 1)} />
           {view === 'inventory' && (
           <Dialog open={isOpen} onOpenChange={(open) => {

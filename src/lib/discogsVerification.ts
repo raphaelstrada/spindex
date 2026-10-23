@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import {
-  getDiscogsMarketStats,
-  getDiscogsReleaseId,
-  marketPriceColumns,
-  pickMarketPrice,
-  searchDiscogsReleases,
-  type DiscogsMarketPrice,
-  type DiscogsRelease,
-} from '@/lib/discogs'
+import { getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import type { CollectionOwner } from '@/lib/collection'
 import type { VinylRecord } from '@/lib/record'
 
@@ -27,7 +19,6 @@ export type DiscogsConflict = {
   title: string | null
   catalogNumber: string | null
   release: DiscogsRelease
-  market: DiscogsMarketPrice | null
   fields: FieldDiff<UpdatableField>[]
   keyMismatches: FieldDiff<KeyField>[]
 }
@@ -45,11 +36,10 @@ type VerificationState = {
   kept: Record<string, string>
 }
 
-export const VERIFICATION_COLUMNS = 'id, artist, title, year_pressed, catalog_number, country_pressed, record_label, record_type, record_size, genre, sub_genre, image_url, discogs_link, media_condition'
+export const VERIFICATION_COLUMNS = 'id, artist, title, year_pressed, catalog_number, country_pressed, record_label, record_type, record_size, genre, sub_genre, image_url, discogs_link'
 
-// Discogs allows 60 authenticated requests per minute. Each record costs 3 (release, price stats and
-// price suggestions), so stay below it and leave room for the rest of the admin.
-const REQUEST_INTERVAL_MS = 3600
+// Discogs allows 60 authenticated requests per minute; stay below it so the rest of the admin keeps working.
+const REQUEST_INTERVAL_MS = 1500
 const RATE_LIMIT_WAIT_MS = 60_000
 const MAX_RATE_LIMIT_RETRIES = 5
 
@@ -135,13 +125,9 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  * Background Discogs verification. Lives at the admin page level so it keeps running while the
  * admin works; progress is saved locally, so a reload resumes where it stopped.
  */
-export function useDiscogsVerification(owner: CollectionOwner, onRecordsChanged?: () => void) {
+export function useDiscogsVerification(owner: CollectionOwner) {
   const [state, setState] = useState<VerificationState>(() => loadState(owner))
   const stateRef = useRef(state)
-  const onRecordsChangedRef = useRef(onRecordsChanged)
-  useEffect(() => {
-    onRecordsChangedRef.current = onRecordsChanged
-  }, [onRecordsChanged])
 
   const update = useCallback((change: (current: VerificationState) => VerificationState) => {
     const next = change(stateRef.current)
@@ -169,7 +155,6 @@ export function useDiscogsVerification(owner: CollectionOwner, onRecordsChanged?
       const records = new Map(((data ?? []) as VinylRecord[]).map((record) => [record.id, record]))
 
       let rateLimitRetries = 0
-      let marketUpdated = false
       while (!cancelled && stateRef.current.position < stateRef.current.queue.length) {
         const record = records.get(stateRef.current.queue[stateRef.current.position])
         const releaseId = record ? recordReleaseId(record) : null
@@ -182,28 +167,11 @@ export function useDiscogsVerification(owner: CollectionOwner, onRecordsChanged?
             const [release] = await searchDiscogsReleases('', '', `https://www.discogs.com/release/${releaseId}`)
             if (!release) throw new Error('NO_DATA')
 
-            // Market data is not a conflict: it is refreshed in the database right away.
-            let market: DiscogsMarketPrice | null = null
-            try {
-              market = pickMarketPrice(await getDiscogsMarketStats(releaseId), record.media_condition)
-            } catch (marketError) {
-              if (/\b429\b/.test(marketError instanceof Error ? marketError.message : '')) throw marketError
-              console.warn(`Discogs market price lookup failed for record ${record.id}:`, marketError)
-            }
-            if (cancelled) return
-            if (market) {
-              const { error: marketSaveError } = await supabase.from('vinyl_records').update(market.price === null
-                ? { discogs_num_for_sale: market.numForSale }
-                : marketPriceColumns(market)).eq('id', record.id)
-              if (marketSaveError) console.error(`Could not save the market price of record ${record.id}:`, marketSaveError)
-              else marketUpdated = true
-            }
-
             const { fields, keyMismatches } = diffRecord(record, release, stateRef.current.kept)
             if (fields.length || keyMismatches.length) {
               conflict = {
                 recordId: record.id, artist: record.artist, title: record.title, catalogNumber: record.catalog_number ?? null,
-                release, market, fields, keyMismatches,
+                release, fields, keyMismatches,
               }
             }
           } catch (lookupError) {
@@ -228,9 +196,7 @@ export function useDiscogsVerification(owner: CollectionOwner, onRecordsChanged?
         }))
       }
 
-      if (cancelled) return
-      update((current) => ({ ...current, status: 'done', finishedAt: new Date().toISOString() }))
-      if (marketUpdated) onRecordsChangedRef.current?.()
+      if (!cancelled) update((current) => ({ ...current, status: 'done', finishedAt: new Date().toISOString() }))
     }
 
     void run()

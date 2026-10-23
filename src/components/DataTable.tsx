@@ -354,7 +354,10 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
 
     if (!releaseId) return 'no-release'
 
-    const market = pickMarketPrice(await getDiscogsMarketStats(releaseId), record.media_condition)
+    const stats = await getDiscogsMarketStats(releaseId)
+    // The token and seller settings problems need the admin's action: stop instead of saving nothing.
+    if (stats.suggestionsError && stats.suggestionsError !== 'NO_SUGGESTIONS') throw new Error(stats.suggestionsError)
+    const market = pickMarketPrice(stats, record.media_condition)
     // Without a suggestion, keep the previous market price and only refresh the copies for sale.
     const changes = market.price === null ? { discogs_num_for_sale: market.numForSale } : marketPriceColumns(market)
 
@@ -383,7 +386,26 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
     setData((current) => current.map((item) => item.id === recordId ? { ...item, sale_price_cad: salePrice } : item))
   }
 
-  async function autoFillDiscogsPrice(record: VinylRecord) {
+  // Price suggestions need the admin's own Discogs token: ask for it like the collection sync does.
+  // Returns true when the lookup can be retried.
+  async function handlePriceLookupProblem(message: string) {
+    const tokenProblem = getDiscogsTokenProblem(message)
+    if (tokenProblem) {
+      const newToken = window.prompt(tokenProblem === 'missing' ? syncUiText.discogsTokenPrompt : syncUiText.discogsTokenInvalid)?.trim() ?? ''
+      if (!newToken) return false
+      try {
+        await saveDiscogsToken(newToken)
+        return true
+      } catch (saveError) {
+        alert(`${t.updateFailed} ${saveError instanceof Error ? saveError.message : String(saveError)}`)
+        return false
+      }
+    }
+    alert(message.includes('DISCOGS_SELLER_SETTINGS_MISSING') ? t.discogsSellerSettingsMissing : `${t.updateFailed} ${message}`)
+    return false
+  }
+
+  async function autoFillDiscogsPrice(record: VinylRecord, isRetry = false) {
     setPendingPriceId(record.id)
     try {
       const result = await updateDiscogsPrice(record)
@@ -395,13 +417,19 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
         })
         return
       }
-      // Auto-fill failed: open the edit dialog with Discogs suggestions to pick the right release.
-      if (result === 'no-release' || result === 'no-price') {
+      // No release found: open the edit dialog with Discogs suggestions to pick the right release.
+      if (result === 'no-release') {
         setEditAutoSearch(true)
         setEditingRecord(record)
       }
+      // The release is known but Discogs has no price suggestion for it: the release is not the problem.
+      if (result === 'no-price') alert(t.noDiscogsPrice)
     } catch (error) {
-      alert(`${t.updateFailed} ${error instanceof Error ? error.message : ''}`)
+      const message = error instanceof Error ? error.message : String(error)
+      if (await handlePriceLookupProblem(message) && !isRetry) {
+        setPendingPriceId(null)
+        return autoFillDiscogsPrice(record, true)
+      }
     } finally {
       setPendingPriceId(null)
     }
@@ -422,7 +450,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
 
   const normalizedSearch = debouncedSearch.trim().toLocaleLowerCase()
   const filteredData = useMemo(() => data.filter((record) => {
-    if (normalizedSearch && !matchesGlobalSearch(record, normalizedSearch)) return false
+    if (normalizedSearch.length >= 3 && !matchesGlobalSearch(record, normalizedSearch)) return false
 
     return Object.entries(advancedFilters).every(([field, query]) => {
       if (!query) return true
@@ -441,7 +469,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
 
     for (const field of dropdownFilterFields) {
       const matchingRecords = data.filter((record) => {
-        if (normalizedSearch && !matchesGlobalSearch(record, normalizedSearch)) return false
+        if (normalizedSearch.length >= 3 && !matchesGlobalSearch(record, normalizedSearch)) return false
 
         const matchesTextFilters = Object.entries(advancedFilters).every(([filterField, query]) => {
           if (!query || dropdownFilterFields.has(filterField)) return true
@@ -801,8 +829,11 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
     let failed = 0
     const updatedRecordIds = new Set<string>()
 
+    let askedForToken = false
+
     try {
-      for (const [index, record] of recordsToUpdate.entries()) {
+      for (let index = 0; index < recordsToUpdate.length; index++) {
+        const record = recordsToUpdate[index]
         setPendingPriceId(record.id)
         setBatchPriceProgress({ current: index + 1, total: recordsToUpdate.length })
         try {
@@ -812,6 +843,16 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
             updatedRecordIds.add(record.id)
           } else unavailable += 1
         } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          // A token or seller settings problem fails every record: ask once, then retry this record or stop.
+          if (/DISCOGS_(TOKEN|SELLER)/.test(message)) {
+            if (!askedForToken && await handlePriceLookupProblem(message)) {
+              askedForToken = true
+              index -= 1
+              continue
+            }
+            return
+          }
           failed += 1
           console.error(`Discogs price lookup failed for record ${record.id}:`, error)
         } finally {

@@ -37,6 +37,8 @@ export type DiscogsPriceStats = {
   listingsCount: number | null
   /** Discogs price suggestion per media condition code (M, NM, VG+, ...); null when unavailable. */
   suggestions?: Record<string, { value: number; currency: string }> | null
+  /** Why suggestions are missing: DISCOGS_TOKEN_MISSING, DISCOGS_TOKEN_INVALID, DISCOGS_SELLER_SETTINGS_MISSING, NO_SUGGESTIONS, ... */
+  suggestionsError?: string | null
 }
 
 export type DiscogsMarketPrice = {
