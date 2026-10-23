@@ -73,10 +73,10 @@ export function BarcodeScanner({
     let handled = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let stream: MediaStream | null = null
+    const video = videoRef.current
 
     async function start() {
       try {
-        const video = videoRef.current
         if (!video) return
         if (!navigator.mediaDevices?.getUserMedia) {
           throw new Error('Camera API unavailable (the page must be served over HTTPS).')
@@ -155,7 +155,7 @@ export function BarcodeScanner({
       if (timer) clearTimeout(timer)
       stream?.getTracks().forEach((track) => track.stop())
       trackRef.current = null
-      if (videoRef.current) videoRef.current.srcObject = null
+      if (video) video.srcObject = null
     }
   }, [])
 

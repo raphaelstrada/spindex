@@ -58,37 +58,59 @@ import { supabase } from '@/lib/supabase'
 import { useCollectionOwner } from '@/lib/collection'
 import { getDiscogsMarketStats, getDiscogsReleaseId, marketPriceColumns, pickMarketPrice, getDiscogsTokenProblem, migrateLegacyDiscogsToken, saveDiscogsToken, searchDiscogsReleases, syncRecordsToDiscogs, type DiscogsSyncResult } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
-import type { VinylRecord } from '@/lib/record'
+import { isOnFacebookMarketplace, storeExclusion, type VinylRecord } from '@/lib/record'
+import { AdminDashboard } from '@/components/AdminDashboard'
 
 const visibleRecordFields = new Set([
   'image_url', 'original_image_url', 'artist', 'title', 'year_pressed', 'catalog_number', 'country_pressed',
   'discogs_market_price', 'discogs_market_currency', 'discogs_market_condition', 'discogs_num_for_sale',
   'marketplace_price', 'marketplace_currency', 'sale_price_cad',
 ])
-const recordFilterFields: string[] = [
-  'id', 'artist', 'title', 'year_pressed', 'catalog_number', 'genre', 'image_url', 'original_image_url', 'source_url',
-  'record_label', 'sub_genre', 'record_type', 'record_size', 'country_pressed',
-  'media_condition', 'sleeve_condition', 'is_original', 'is_special_edition',
-  'special_edition_reason', 'sell_possibility', 'sold', 'discogs_market_price', 'discogs_num_for_sale', 'marketplace_price', 'marketplace_currency',
-  'notes', 'discogs_link',
-]
 const dropdownFilterFields = new Set([
   'artist', 'title', 'year_pressed', 'genre', 'record_label',
   'sub_genre', 'country_pressed', 'media_condition', 'sleeve_condition',
 ])
 const compactColumns = new Set(['discogs_market_price', 'marketplace_price', 'price_on_discogs', 'sale_price_cad'])
-const autocompleteFilterFields = new Set(['artist', 'title'])
+const autocompleteFilterFields = new Set(['artist', 'title', 'record_label'])
 
-// Mirrors the public_catalog filter; only drives non-blocking warnings.
-function isHiddenFromStore(record: VinylRecord) {
-  return storeExclusion(record) !== null
+// Advanced search shows only the fields each admin view searches by.
+const advancedFieldsByView: Record<AdminView, string[]> = {
+  inventory: ['artist', 'title', 'record_label', 'year_pressed', 'genre', 'country_pressed', 'media_condition'],
+  sales: ['artist', 'title', 'record_label', 'genre', 'media_condition', 'sleeve_condition'],
 }
 
-function storeExclusion(record: VinylRecord): 'sold' | 'notForSale' | 'noPrice' | null {
-  if (record.sold) return 'sold'
-  if (!record.sell_possibility) return 'notForSale'
-  if (record.marketplace_price == null && record.price_on_discogs == null) return 'noPrice'
-  return null
+type QuickFilter = { id: string; options: { value: string; test: (record: VinylRecord) => boolean }[] }
+
+// Status filters: one click instead of typing into raw columns.
+const quickFilterDefinitions: Record<string, QuickFilter> = {
+  discogsSync: { id: 'discogsSync', options: [
+    { value: 'synced', test: (record) => Boolean(record.discogs_synced_at) },
+    { value: 'notSynced', test: (record) => !record.discogs_synced_at },
+  ] },
+  facebook: { id: 'facebook', options: [
+    { value: 'listed', test: isOnFacebookMarketplace },
+    { value: 'notListed', test: (record) => !isOnFacebookMarketplace(record) },
+  ] },
+  storeStatus: { id: 'storeStatus', options: [
+    { value: 'inStore', test: (record) => storeExclusion(record) === null },
+    { value: 'sold', test: (record) => storeExclusion(record) === 'sold' },
+    { value: 'noPrice', test: (record) => storeExclusion(record) === 'noPrice' },
+    { value: 'notForSale', test: (record) => storeExclusion(record) === 'notForSale' },
+  ] },
+  discogsPrice: { id: 'discogsPrice', options: [
+    { value: 'hasPrice', test: (record) => !hasNoDiscogsPrice(record) },
+    { value: 'missingPrice', test: hasNoDiscogsPrice },
+  ] },
+}
+
+const quickFiltersByView: Record<AdminView, string[]> = {
+  inventory: ['discogsSync', 'facebook'],
+  sales: ['storeStatus', 'discogsPrice', 'facebook'],
+}
+
+
+function isHiddenFromStore(record: VinylRecord) {
+  return storeExclusion(record) !== null
 }
 
 export type AdminView = 'inventory' | 'sales'
@@ -143,6 +165,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
   const [globalSearch, setGlobalSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [advancedFilters, setAdvancedFilters] = useState<Record<string, string>>({})
+  const [quickFilters, setQuickFilters] = useState<Record<string, string>>({})
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 100 })
   const [previewingRecord, setPreviewingRecord] = useState<VinylRecord | null>(null)
   const [editingRecord, setEditingRecord] = useState<VinylRecord | null>(null)
@@ -165,6 +188,24 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
   const filterUiText = language === 'pt'
     ? { selectValue: translations.pt.table.selectFilterValue, clearSelection: translations.pt.table.clearFilterSelection, resetAll: translations.pt.table.resetAll }
     : { selectValue: translations.en.table.selectFilterValue, clearSelection: translations.en.table.clearFilterSelection, resetAll: translations.en.table.resetAll }
+  const quickFilterLabels: Record<string, string> = {
+    discogsSync: t.quickFilterDiscogsSync,
+    facebook: t.quickFilterFacebook,
+    storeStatus: t.quickFilterStoreStatus,
+    discogsPrice: t.quickFilterDiscogsPrice,
+  }
+  const quickFilterOptionLabels: Record<string, string> = {
+    synced: t.quickFilterSynced,
+    notSynced: t.quickFilterNotSynced,
+    listed: t.quickFilterListed,
+    notListed: t.quickFilterNotListed,
+    inStore: t.quickFilterInStore,
+    sold: t.quickFilterSold,
+    noPrice: t.quickFilterNoPrice,
+    notForSale: t.quickFilterNotForSale,
+    hasPrice: t.quickFilterHasPrice,
+    missingPrice: t.quickFilterMissingPrice,
+  }
   const priceUiText = language === 'pt'
     ? {
         selectAllUnpriced: translations.pt.table.selectAllUnpriced,
@@ -242,7 +283,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
         for (;;) {
           const { data: records, error } = await supabase
             .from('vinyl_records')
-            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_market_price, discogs_market_currency, discogs_market_condition, discogs_num_for_sale, price_on_discogs, sale_price_cad:record_sale_price_cad, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
+            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, discogs_market_price, discogs_market_currency, discogs_market_condition, discogs_num_for_sale, price_on_discogs, sale_price_cad:record_sale_price_cad, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
             .eq('collection_owner', owner)
             .order('created_at', { ascending: false })
             .order('id', { ascending: true })
@@ -449,16 +490,24 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
   }, [globalSearch])
 
   const normalizedSearch = debouncedSearch.trim().toLocaleLowerCase()
+  // Filters for fields the current view does not show are ignored, so switching views never hides records silently.
+  const activeAdvancedFilters = useMemo(() => Object.fromEntries(
+    Object.entries(advancedFilters).filter(([field, query]) => query.trim() && advancedFieldsByView[view].includes(field)),
+  ), [advancedFilters, view])
+  const activeQuickFilters = useMemo(() => quickFiltersByView[view]
+    .map((id) => quickFilterDefinitions[id].options.find((option) => option.value === quickFilters[id]))
+    .filter((option): option is QuickFilter['options'][number] => Boolean(option)), [quickFilters, view])
+  const activeFilterCount = Object.keys(activeAdvancedFilters).length + activeQuickFilters.length
   const filteredData = useMemo(() => data.filter((record) => {
     if (normalizedSearch.length >= 3 && !matchesGlobalSearch(record, normalizedSearch)) return false
+    if (!activeQuickFilters.every((option) => option.test(record))) return false
 
-    return Object.entries(advancedFilters).every(([field, query]) => {
-      if (!query) return true
+    return Object.entries(activeAdvancedFilters).every(([field, query]) => {
       const recordValue = searchableValue(record[field], language)
       if (dropdownFilterFields.has(field) && !autocompleteFilterFields.has(field)) return recordValue === query
       return recordValue.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
     })
-  }), [data, normalizedSearch, advancedFilters, language])
+  }), [data, normalizedSearch, activeAdvancedFilters, activeQuickFilters, language])
   const unpricedFilteredRecords = filteredData.filter(hasNoDiscogsPrice)
   const selectedFilteredUnpricedCount = unpricedFilteredRecords.filter((record) => selectedPriceIds.has(record.id)).length
   const selectedUnpricedRecords = data.filter((record) => selectedPriceIds.has(record.id) && hasNoDiscogsPrice(record))
@@ -467,22 +516,16 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
   const dropdownOptions = useMemo<Record<string, string[]>>(() => {
     const options: Record<string, string[]> = {}
 
-    for (const field of dropdownFilterFields) {
+    for (const field of advancedFieldsByView[view]) {
+      // Each field lists the values left by the other filters (so options never lead to zero results).
       const matchingRecords = data.filter((record) => {
         if (normalizedSearch.length >= 3 && !matchesGlobalSearch(record, normalizedSearch)) return false
+        if (!activeQuickFilters.every((option) => option.test(record))) return false
 
-        const matchesTextFilters = Object.entries(advancedFilters).every(([filterField, query]) => {
-          if (!query || dropdownFilterFields.has(filterField)) return true
-          return searchableValue(record[filterField], language).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
-        })
-        if (!matchesTextFilters) return false
-
-        return [...dropdownFilterFields].every((otherField) => {
+        return Object.entries(activeAdvancedFilters).every(([otherField, selected]) => {
           if (otherField === field) return true
-          const selected = advancedFilters[otherField]
-          if (!selected) return true
           const recordValue = searchableValue(record[otherField], language)
-          return autocompleteFilterFields.has(otherField)
+          return autocompleteFilterFields.has(otherField) || !dropdownFilterFields.has(otherField)
             ? recordValue.toLocaleLowerCase().includes(selected.trim().toLocaleLowerCase())
             : recordValue === selected
         })
@@ -496,7 +539,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
     }
 
     return options
-  }, [data, normalizedSearch, advancedFilters, language])
+  }, [data, normalizedSearch, activeAdvancedFilters, activeQuickFilters, language, view])
 
   function updateAdvancedFilter(field: string, value: string) {
     setAdvancedFilters((current) => ({ ...current, [field]: value }))
@@ -512,9 +555,15 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
     setPagination((current) => ({ ...current, pageIndex: 0 }))
   }
 
+  function updateQuickFilter(id: string, value: string) {
+    setQuickFilters((current) => ({ ...current, [id]: current[id] === value ? '' : value }))
+    setPagination((current) => ({ ...current, pageIndex: 0 }))
+  }
+
   function resetAllFilters() {
     setGlobalSearch('')
     setAdvancedFilters({})
+    setQuickFilters({})
     setPagination((current) => ({ ...current, pageIndex: 0 }))
   }
 
@@ -1305,6 +1354,8 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
 
   return (
     <>
+      <AdminDashboard records={data} view={view} language={language} />
+
       <div className="mb-5 space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Input
@@ -1322,15 +1373,48 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
             type="button"
             variant="outline"
             onClick={resetAllFilters}
-            disabled={!globalSearch.trim() && !Object.values(advancedFilters).some((value) => value.trim())}
+            disabled={!globalSearch.trim() && activeFilterCount === 0}
           >
             {filterUiText.resetAll}
           </Button>
+          {(normalizedSearch.length >= 3 || activeFilterCount > 0) && (
+            <p className="text-sm text-muted-foreground sm:ml-auto" role="status">
+              {t.resultsCount.replace('{shown}', String(filteredData.length)).replace('{total}', String(data.length))}
+            </p>
+          )}
         </div>
         <details className="rounded-md border bg-card px-4 py-3 shadow-sm">
-          <summary className="cursor-pointer text-sm font-medium">{t.advancedSearch}</summary>
-          <div className="grid grid-cols-1 gap-3 pt-4 sm:grid-cols-2 lg:grid-cols-3">
-            {[...dropdownFilterFields].map((field) => {
+          <summary className="cursor-pointer text-sm font-medium">
+            {t.advancedSearch}
+            {activeFilterCount > 0 && (
+              <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                {t.activeFilters.replace('{count}', String(activeFilterCount))}
+              </span>
+            )}
+          </summary>
+          <div className="flex flex-wrap gap-x-6 gap-y-3 pt-4">
+            {quickFiltersByView[view].map((id) => (
+              <div key={id} className="space-y-1.5">
+                <p className="text-sm font-medium">{quickFilterLabels[id]}</p>
+                <div role="group" aria-label={quickFilterLabels[id]} className="inline-flex flex-wrap rounded-md border p-0.5">
+                  {quickFilterDefinitions[id].options.map((option) => (
+                    <Button
+                      key={option.value}
+                      type="button"
+                      size="sm"
+                      variant={quickFilters[id] === option.value ? 'default' : 'ghost'}
+                      aria-pressed={quickFilters[id] === option.value}
+                      onClick={() => updateQuickFilter(id, option.value)}
+                    >
+                      {quickFilterOptionLabels[option.value]}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 gap-3 pt-4 sm:grid-cols-2 lg:grid-cols-4">
+            {advancedFieldsByView[view].map((field) => {
               const value = advancedFilters[field] ?? ''
               const label = t.detailLabels[field as keyof typeof t.detailLabels] ?? field.replace(/_/g, ' ')
               const options = dropdownOptions[field] ?? []
@@ -1380,19 +1464,6 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
                 </div>
               )
             })}
-            {recordFilterFields.filter((field) => !dropdownFilterFields.has(field)).map((field) => (
-              <div key={field} className="space-y-1.5">
-                <Label htmlFor={`filter-${field}`}>
-                  {t.detailLabels[field as keyof typeof t.detailLabels] ?? field.replace(/_/g, ' ')}
-                </Label>
-                <Input
-                  id={`filter-${field}`}
-                  value={advancedFilters[field] ?? ''}
-                  onChange={(event) => updateAdvancedFilter(field, event.target.value)}
-                  placeholder={t.filterByField}
-                />
-              </div>
-            ))}
           </div>
         </details>
       </div>

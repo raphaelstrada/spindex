@@ -38,3 +38,15 @@ export type VinylRecord = {
   created_at?: string | null
   [key: string]: unknown
 }
+// Mirrors the public_catalog filter; only drives non-blocking warnings and admin stats.
+export function storeExclusion(record: VinylRecord): 'sold' | 'notForSale' | 'noPrice' | null {
+  if (record.sold) return 'sold'
+  if (!record.sell_possibility) return 'notForSale'
+  if (record.marketplace_price == null && record.price_on_discogs == null) return 'noPrice'
+  return null
+}
+
+/** A record counts as on Facebook Marketplace once it has a listing URL or a Marketplace price. */
+export function isOnFacebookMarketplace(record: VinylRecord) {
+  return Boolean(record.source_url?.includes('facebook.com')) || record.marketplace_price != null
+}

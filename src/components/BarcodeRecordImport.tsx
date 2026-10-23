@@ -2,33 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { DiscogsCandidatePicker } from '@/components/DiscogsCandidatePicker'
 import { RecordForm } from '@/components/RecordForm'
 import { Button } from '@/components/ui/button'
-import { searchDiscogsByBarcode, type DiscogsRelease } from '@/lib/discogs'
+import { searchDiscogsByBarcode, valuesFromRelease, type DiscogsRelease } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
-import type { VinylRecord } from '@/lib/record'
-
-export function valuesFromRelease(release: DiscogsRelease, artistAndTitleOnly: boolean): Partial<VinylRecord> {
-  if (artistAndTitleOnly) {
-    return { artist: release.artist, title: release.releaseTitle }
-  }
-
-  return {
-    artist: release.artist,
-    title: release.releaseTitle,
-    year_pressed: release.year ?? undefined,
-    country_pressed: release.country ?? '',
-    record_label: release.label[0] ?? '',
-    catalog_number: release.catalogNumber ?? '',
-    genre: release.genre ?? '',
-    sub_genre: release.subGenre ?? '',
-    record_type: release.recordType ?? '',
-    record_size: release.recordSize ?? '',
-    media_condition: '',
-    sleeve_condition: '',
-    is_original: false,
-    discogs_link: release.url,
-    image_url: release.coverImage,
-  }
-}
 
 /** After a barcode scan: Discogs matches first (same box as the photo import), then the record form. */
 export function BarcodeRecordImport({
@@ -53,12 +28,8 @@ export function BarcodeRecordImport({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // AdminPage remounts this component per barcode (key), so the initial state is already reset.
     let cancelled = false
-    setIsLoading(true)
-    setError(null)
-    setCandidates([])
-    setSelectedId(null)
-    setArtistAndTitleOnly(false)
 
     searchDiscogsByBarcode(barcode)
       .then((results) => {

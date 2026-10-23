@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import type { VinylRecord } from '@/lib/record'
 
 export type DiscogsRelease = {
   id: number
@@ -47,6 +48,8 @@ export type DiscogsMarketPrice = {
   /** Condition the price is for (the record's own condition, or VG+ as fallback). */
   condition: string | null
   numForSale: number | null
+  /** Lowest current listing on Discogs (any condition), informational only. */
+  lowestPrice: number | null
 }
 
 const FALLBACK_MARKET_CONDITION = 'VG+'
@@ -60,6 +63,7 @@ export function pickMarketPrice(stats: DiscogsPriceStats, mediaCondition: string
     currency: suggestion?.currency ?? null,
     condition: suggestion ? condition : null,
     numForSale: stats.listingsCount,
+    lowestPrice: stats.lowestPrice,
   }
 }
 
@@ -70,6 +74,7 @@ export function marketPriceColumns(market: DiscogsMarketPrice) {
     discogs_market_currency: market.currency,
     discogs_market_condition: market.condition,
     discogs_num_for_sale: market.numForSale,
+    discogs_lowest_price: market.lowestPrice,
     discogs_market_checked_at: new Date().toISOString(),
   }
 }
@@ -317,4 +322,28 @@ export async function syncRecordsToDiscogs(
 
   if (!data) throw new Error('[discogs-sync] Empty response from the function.')
   return data
+}
+
+export function valuesFromRelease(release: DiscogsRelease, artistAndTitleOnly: boolean): Partial<VinylRecord> {
+  if (artistAndTitleOnly) {
+    return { artist: release.artist, title: release.releaseTitle }
+  }
+
+  return {
+    artist: release.artist,
+    title: release.releaseTitle,
+    year_pressed: release.year ?? undefined,
+    country_pressed: release.country ?? '',
+    record_label: release.label[0] ?? '',
+    catalog_number: release.catalogNumber ?? '',
+    genre: release.genre ?? '',
+    sub_genre: release.subGenre ?? '',
+    record_type: release.recordType ?? '',
+    record_size: release.recordSize ?? '',
+    media_condition: '',
+    sleeve_condition: '',
+    is_original: false,
+    discogs_link: release.url,
+    image_url: release.coverImage,
+  }
 }

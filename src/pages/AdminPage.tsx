@@ -220,6 +220,7 @@ export default function AdminPage() {
                 <CatalogNumberRecordImport language={language} onSuccess={handleRecordAdded} onSkip={closeAddRecordDialog} />
               ) : addRecordPath === 'barcode' && scannedBarcode ? (
                 <BarcodeRecordImport
+                  key={scannedBarcode}
                   language={language}
                   barcode={scannedBarcode}
                   onRescan={() => {

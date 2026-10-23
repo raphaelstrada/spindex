@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react'
-import { valuesFromRelease } from '@/components/BarcodeRecordImport'
 import { DiscogsCandidatePicker } from '@/components/DiscogsCandidatePicker'
 import { RecordForm } from '@/components/RecordForm'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { searchDiscogsByCatalogNumber, type DiscogsRelease } from '@/lib/discogs'
+import { searchDiscogsByCatalogNumber, valuesFromRelease, type DiscogsRelease } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
 
 /** Catalog number -> fuzzy Discogs matches (exact first, then pressing country) -> record form. Same flow as the barcode import. */
