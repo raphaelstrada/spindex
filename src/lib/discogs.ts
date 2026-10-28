@@ -214,6 +214,35 @@ export async function searchDiscogsByCatalogNumber(catalogNumber: string, artist
       || countryRank(left.country) - countryRank(right.country))
 }
 
+export type DiscogsArtistAlbum = {
+  masterId: number
+  title: string
+  year: number | null
+  thumb: string | null
+  url: string
+  /** Discogs users who own / want it: used as a popularity ranking. */
+  inCollection: number
+  inWantlist: number
+}
+
+/** The main artist's albums (Discogs masters), found from one of the admin's releases by that artist. */
+export async function getArtistDiscography(releaseId: number): Promise<{ artistId: number | null; artistName: string | null; items: DiscogsArtistAlbum[] }> {
+  const { data, error } = await supabase.functions.invoke<{ artistId: number | null; artistName: string | null; items: DiscogsArtistAlbum[] }>(
+    'discogs-search',
+    { body: { artistGapsReleaseId: releaseId } },
+  )
+
+  if (error) {
+    if (error.context instanceof Response) {
+      const details = await error.context.json().catch(() => null) as { error?: string } | null
+      throw new Error(details?.error || error.message)
+    }
+    throw new Error(error.message)
+  }
+
+  return data ?? { artistId: null, artistName: null, items: [] }
+}
+
 export async function getDiscogsMarketStats(releaseId: number): Promise<DiscogsPriceStats> {
   const { data, error } = await supabase.functions.invoke<DiscogsPriceStats>(
     'discogs-search',

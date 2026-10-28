@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
+import { parseSpotifyAlbumId, spotifyAlbumUrl } from '@/lib/spotify'
 
 function getLevenshteinDistance(a: string, b: string): number {
   const matrix: number[][] = []
@@ -116,6 +117,9 @@ function createFormSchema(language: Language) {
     discogs_link: z.string().optional(),
     image_url: z.string().optional(),
     source_url: z.string().optional(),
+    // Typed as a URL; saved as the album id (see parseSpotifyAlbumId on save).
+    spotify_album_id: z.string().optional()
+      .refine((value) => !value?.trim() || parseSpotifyAlbumId(value) !== null, t.spotifyAlbumUrlInvalid),
   })
 }
 
@@ -204,6 +208,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       discogs_link: record?.discogs_link ?? initialValues?.discogs_link ?? '',
       image_url: record?.image_url ?? initialValues?.image_url ?? '',
       source_url: record?.source_url ?? initialValues?.source_url ?? '',
+      spotify_album_id: record?.spotify_album_id ? spotifyAlbumUrl(record.spotify_album_id) : '',
     },
   })
 
@@ -261,6 +266,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       ...values,
       ...marketDetails,
       discogs_market_price: discogsMarketPrice,
+      spotify_album_id: parseSpotifyAlbumId(values.spotify_album_id) ?? undefined,
       ...(originalImageUrl ? { original_image_url: originalImageUrl } : {}),
     }
     const releaseChanged = Boolean(record?.discogs_synced_at)
@@ -275,6 +281,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       marketplace_price: valuesToSave.marketplace_price ?? null,
       marketplace_currency: valuesToSave.marketplace_currency || null,
       hero_tagline: valuesToSave.hero_tagline?.trim() || null,
+      spotify_album_id: valuesToSave.spotify_album_id ?? null,
       ...(releaseChanged ? { discogs_synced_at: null } : {}),
     }
     const { error } = record
@@ -308,6 +315,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       marketplace_price: pendingFormValues.marketplace_price ?? null,
       marketplace_currency: pendingFormValues.marketplace_currency || null,
       hero_tagline: pendingFormValues.hero_tagline?.trim() || null,
+      spotify_album_id: parseSpotifyAlbumId(pendingFormValues.spotify_album_id),
     }
 
     const { error } = await supabase
@@ -323,7 +331,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
 
     setDuplicateRecord(null)
     setPendingFormValues(null)
-    onSuccess?.(pendingFormValues)
+    onSuccess?.({ ...pendingFormValues, spotify_album_id: databaseValues.spotify_album_id ?? undefined })
   }
 
   async function handleCreateDuplicate() {
@@ -851,6 +859,9 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
           )} />
           <FormField control={form.control} name="source_url" render={({ field }) => (
             <FormItem><FormLabel>{t.facebookMarketplaceLink}</FormLabel><FormControl><Input type="url" placeholder="https://www.facebook.com/marketplace/item/..." {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+          <FormField control={form.control} name="spotify_album_id" render={({ field }) => (
+            <FormItem><FormLabel>{t.spotifyAlbumUrl}</FormLabel><FormControl><Input type="url" placeholder="https://open.spotify.com/album/..." {...field} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
 

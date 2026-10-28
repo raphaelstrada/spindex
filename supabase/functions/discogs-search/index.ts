@@ -250,6 +250,56 @@ async function fetchPriceSuggestions(releaseId: number, admin: AdminContext) {
     : { suggestions: null, suggestionsError: 'NO_SUGGESTIONS' }
 }
 
+type ArtistRelease = {
+  id: number
+  type?: string
+  role?: string
+  title?: string
+  year?: number
+  thumb?: string
+  stats?: { community?: { in_collection?: number; in_wantlist?: number } }
+}
+
+/**
+ * The main artist's albums (Discogs masters where the artist has the Main role), for the admin
+ * "missing from your collection" insights. The client removes the albums it already owns.
+ */
+async function fetchArtistDiscography(releaseId: number, headers: Record<string, string>) {
+  const releaseResponse = await fetch(`https://api.discogs.com/releases/${releaseId}`, { headers })
+  if (!releaseResponse.ok) throw new Error(`Discogs returned HTTP ${releaseResponse.status} for release ${releaseId}.`)
+  const release = await releaseResponse.json() as { artists?: { id?: number; name?: string }[] }
+  const artist = release.artists?.[0]
+  // Discogs uses id 194 for "Various": compilations have no discography to compare.
+  if (!artist?.id || artist.id === 194) return { artistId: null, artistName: artist?.name ?? null, items: [] }
+
+  const items: { masterId: number; title: string; year: number | null; thumb: string | null; url: string; inCollection: number; inWantlist: number }[] = []
+  for (let page = 1; page <= 3; page += 1) {
+    const url = new URL(`https://api.discogs.com/artists/${artist.id}/releases`)
+    url.searchParams.set('sort', 'year')
+    url.searchParams.set('per_page', '100')
+    url.searchParams.set('page', String(page))
+    const response = await fetch(url, { headers })
+    if (!response.ok) throw new Error(`Discogs returned HTTP ${response.status} for the artist releases.`)
+    const payload = await response.json() as { releases?: ArtistRelease[]; pagination?: { pages?: number } }
+
+    for (const item of payload.releases ?? []) {
+      if (item.type !== 'master' || item.role !== 'Main' || !item.title) continue
+      items.push({
+        masterId: item.id,
+        title: item.title,
+        year: typeof item.year === 'number' && item.year > 0 ? item.year : null,
+        thumb: item.thumb || null,
+        url: `https://www.discogs.com/master/${item.id}`,
+        inCollection: item.stats?.community?.in_collection ?? 0,
+        inWantlist: item.stats?.community?.in_wantlist ?? 0,
+      })
+    }
+    if (!payload.pagination?.pages || page >= payload.pagination.pages) break
+  }
+
+  return { artistId: artist.id, artistName: artist.name?.replace(/\s\(\d+\)$/, '') ?? null, items }
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -275,6 +325,7 @@ Deno.serve(async (request) => {
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     const releaseUrl = typeof body.releaseUrl === 'string' ? body.releaseUrl.trim() : ''
     const priceReleaseId = typeof body.priceReleaseId === 'number' ? body.priceReleaseId : null
+    const gapsReleaseId = typeof body.artistGapsReleaseId === 'number' ? body.artistGapsReleaseId : null
     const country = typeof body.country === 'string' ? body.country.trim() : ''
     const year = typeof body.year === 'number' || typeof body.year === 'string'
       ? String(body.year).trim()
@@ -292,7 +343,11 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: 'Enter a valid catalog number.' }, 400)
     }
 
-    if ((priceReleaseId === null && !artist && !title && !releaseUrl && !barcode && !catno) || (priceReleaseId !== null && (!Number.isSafeInteger(priceReleaseId) || priceReleaseId <= 0)) || artist.length > 200 || title.length > 200 || releaseUrl.length > 500 || country.length > 100 || (year && !/^\d{4}$/.test(year))) {
+    if (gapsReleaseId !== null && (!Number.isSafeInteger(gapsReleaseId) || gapsReleaseId <= 0)) {
+      return jsonResponse({ error: 'Invalid release id.' }, 400)
+    }
+
+    if ((priceReleaseId === null && gapsReleaseId === null && !artist && !title && !releaseUrl && !barcode && !catno) || (priceReleaseId !== null && (!Number.isSafeInteger(priceReleaseId) || priceReleaseId <= 0)) || artist.length > 200 || title.length > 200 || releaseUrl.length > 500 || country.length > 100 || (year && !/^\d{4}$/.test(year))) {
       return jsonResponse({ error: 'Provide an artist, an album title, or both.' }, 400)
     }
 
@@ -313,6 +368,10 @@ Deno.serve(async (request) => {
       Authorization: token
         ? `Discogs token=${token}`
         : `Discogs key=${consumerKey}, secret=${consumerSecret}`,
+    }
+
+    if (gapsReleaseId !== null) {
+      return jsonResponse(await fetchArtistDiscography(gapsReleaseId, discogsHeaders))
     }
 
     if (priceReleaseId !== null) {

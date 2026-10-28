@@ -24,6 +24,7 @@ import {
 import { translations, type Language } from '@/lib/i18n'
 import { Logo } from '@/components/Logo'
 import { supabase } from '@/lib/supabase'
+import { completeSpotifyLogin } from '@/lib/spotify'
 
 type AddRecordPath = 'picture' | 'catalogNumber' | 'discogsUrl' | 'manual' | 'barcode' | null
 
@@ -48,6 +49,16 @@ export default function AdminPage() {
   useEffect(() => {
     window.localStorage.setItem('spindex-admin-view', view)
   }, [view])
+
+  // Spotify redirects back here (?code=&state=) after "Connect Spotify"; the sync then picks up the token.
+  const spotifyLoginFailed = t.spotify.loginFailed
+  useEffect(() => {
+    completeSpotifyLogin()
+      .then((connected) => {
+        if (connected) setRecordsVersion((version) => version + 1)
+      })
+      .catch((error) => alert(`${spotifyLoginFailed} ${error instanceof Error ? error.message : String(error)}`))
+  }, [spotifyLoginFailed])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')

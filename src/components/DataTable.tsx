@@ -19,6 +19,7 @@ import {
   Disc3,
   LoaderCircle,
   Minus,
+  Music,
   Pencil,
   Plus,
   Star,
@@ -58,8 +59,10 @@ import { supabase } from '@/lib/supabase'
 import { useCollectionOwner } from '@/lib/collection'
 import { getDiscogsMarketStats, getDiscogsReleaseId, marketPriceColumns, pickMarketPrice, getDiscogsTokenProblem, migrateLegacyDiscogsToken, saveDiscogsToken, searchDiscogsReleases, syncRecordsToDiscogs, type DiscogsSyncResult } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
-import { isOnFacebookMarketplace, storeExclusion, type VinylRecord } from '@/lib/record'
+import { isOnFacebookMarketplace, normalizeMatchText, storeExclusion, type VinylRecord } from '@/lib/record'
 import { AdminDashboard } from '@/components/AdminDashboard'
+import { CollectionGaps } from '@/components/CollectionGaps'
+import { connectSpotify, disconnectSpotify, isSpotifyConfigured, isSpotifyConnected, matchSpotifyAlbum, saveAlbumsToLibrary, SPOTIFY_PLAYLIST_NAME, spotifyAlbumUrl, syncPlaylist } from '@/lib/spotify'
 
 const visibleRecordFields = new Set([
   'image_url', 'original_image_url', 'artist', 'title', 'year_pressed', 'catalog_number', 'country_pressed',
@@ -184,6 +187,11 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
   const [isBatchPriceLoading, setIsBatchPriceLoading] = useState(false)
   const [batchPriceProgress, setBatchPriceProgress] = useState<{ current: number; total: number } | null>(null)
   const [batchPriceSummary, setBatchPriceSummary] = useState<string | null>(null)
+  const [spotifyProgress, setSpotifyProgress] = useState<string | null>(null)
+  const [spotifyResult, setSpotifyResult] = useState<{ summary: string; playlistUrl: string; notFound: VinylRecord[] } | null>(null)
+  // Re-render after connecting/disconnecting (the token lives in localStorage).
+  const [, setSpotifyConnectionVersion] = useState(0)
+  const spotifyText = translations[language].spotify
   const t = translations[language].table
   const filterUiText = language === 'pt'
     ? { selectValue: translations.pt.table.selectFilterValue, clearSelection: translations.pt.table.clearFilterSelection, resetAll: translations.pt.table.resetAll }
@@ -283,7 +291,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
         for (;;) {
           const { data: records, error } = await supabase
             .from('vinyl_records')
-            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, discogs_market_price, discogs_market_currency, discogs_market_condition, discogs_num_for_sale, price_on_discogs, sale_price_cad:record_sale_price_cad, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
+            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, discogs_market_price, discogs_market_currency, discogs_market_condition, discogs_num_for_sale, price_on_discogs, sale_price_cad:record_sale_price_cad, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, spotify_album_id, spotify_matched_at, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
             .eq('collection_owner', owner)
             .order('created_at', { ascending: false })
             .order('id', { ascending: true })
@@ -368,13 +376,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       ?? getDiscogsReleaseId(record.image_url)
 
     if (!releaseId && record.artist && record.title) {
-      const normalize = (value: string) => value
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .replace(/\band\b/g, ' ')
-        .replace(/[^a-z0-9]+/g, ' ')
-        .trim()
+      const normalize = normalizeMatchText
       const releases = await searchDiscogsReleases(record.artist, record.title, undefined, {
         year: record.year_pressed ?? undefined,
       })
@@ -601,6 +603,70 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       }
       return next
     })
+  }
+
+  // Matches the records still owned (not sold) on Spotify, saves the albums to the library and
+  // rebuilds the "Spindex – My vinyl" playlist. Only album ids are stored in the database.
+  async function syncWithSpotify() {
+    if (!isSpotifyConfigured()) {
+      alert(spotifyText.notConfigured)
+      return
+    }
+    if (!isSpotifyConnected(owner)) {
+      await connectSpotify(owner)
+      return
+    }
+
+    setSpotifyResult(null)
+    setSpotifyProgress(spotifyText.matching.replace('{current}', '0').replace('{total}', '…'))
+    try {
+      const owned = data.filter((record) => !record.sold)
+      const toMatch = owned.filter((record) => !record.spotify_album_id)
+      const matchedIds = new Map<string, string>()
+      const notFound: VinylRecord[] = []
+
+      for (const [index, record] of toMatch.entries()) {
+        setSpotifyProgress(spotifyText.matching.replace('{current}', String(index + 1)).replace('{total}', String(toMatch.length)))
+        const albumId = await matchSpotifyAlbum(owner, record)
+        if (!albumId) {
+          notFound.push(record)
+          continue
+        }
+        const changes = { spotify_album_id: albumId, spotify_matched_at: new Date().toISOString() }
+        const { error } = await supabase.from('vinyl_records').update(changes).eq('id', record.id)
+        if (error) throw new Error(error.message)
+        matchedIds.set(record.id, albumId)
+        setData((current) => current.map((item) => item.id === record.id ? { ...item, ...changes } : item))
+      }
+
+      const albumIds = [...new Set(owned
+        .map((record) => matchedIds.get(record.id) ?? record.spotify_album_id)
+        .filter((id): id is string => Boolean(id)))]
+      setSpotifyProgress(spotifyText.saving)
+      await saveAlbumsToLibrary(owner, albumIds)
+      const playlist = await syncPlaylist(owner, albumIds, (current, total) =>
+        setSpotifyProgress(spotifyText.buildingPlaylist.replace('{current}', String(current)).replace('{total}', String(total))))
+
+      setSpotifyResult({
+        summary: spotifyText.summary
+          .replace('{matched}', String(matchedIds.size))
+          .replace('{notFound}', String(notFound.length))
+          .replace('{saved}', String(albumIds.length))
+          .replace('{tracks}', String(playlist.trackCount))
+          .replace('{playlist}', SPOTIFY_PLAYLIST_NAME),
+        playlistUrl: playlist.playlistUrl,
+        notFound,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message === 'SPOTIFY_NOT_CONNECTED') {
+        await connectSpotify(owner)
+        return
+      }
+      alert(`${spotifyText.failed} ${message}`)
+    } finally {
+      setSpotifyProgress(null)
+    }
   }
 
   // Open the batch flow: edit each record without a Discogs link, one by one.
@@ -1236,6 +1302,23 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       },
     },
     {
+      id: 'spotify',
+      header: spotifyText.column,
+      enableSorting: false,
+      size: 44,
+      cell: ({ row }) => {
+        const albumId = row.original.spotify_album_id
+        if (!albumId) return null
+        return (
+          <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-brand-green">
+            <a href={spotifyAlbumUrl(albumId)} target="_blank" rel="noopener noreferrer" aria-label={spotifyText.openOnSpotify} title={spotifyText.openOnSpotify}>
+              <Music aria-hidden="true" />
+            </a>
+          </Button>
+        )
+      },
+    },
+    {
       id: 'actions',
       header: t.actions,
       enableSorting: false,
@@ -1355,6 +1438,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
   return (
     <>
       <AdminDashboard records={data} view={view} language={language} />
+      {view === 'inventory' && <CollectionGaps records={data} language={language} />}
 
       <div className="mb-5 space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1506,7 +1590,30 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       )}
       {batchPriceSummary && <p className="mb-3 text-sm text-muted-foreground" role="status">{batchPriceSummary}</p>}
 
-      {view === 'inventory' && <div className="mb-3 flex justify-end">
+      {view === 'inventory' && <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+        {spotifyProgress && <p className="text-sm text-muted-foreground" role="status">{spotifyProgress}</p>}
+        {isSpotifyConnected(owner) && (
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={spotifyProgress !== null}
+            onClick={() => {
+              disconnectSpotify(owner)
+              setSpotifyConnectionVersion((version) => version + 1)
+            }}
+          >
+            {spotifyText.disconnect}
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          disabled={spotifyProgress !== null}
+          onClick={() => void syncWithSpotify()}
+        >
+          {spotifyProgress ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Music aria-hidden="true" />}
+          {isSpotifyConnected(owner) ? spotifyText.sync : spotifyText.connect}
+        </Button>
         <Button
           type="button"
           variant="outline"
@@ -1516,6 +1623,32 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
           {translations[language].app.batchDiscogsSync}
         </Button>
       </div>}
+
+      {view === 'inventory' && spotifyResult && (
+        <div className="mb-3 rounded-md border bg-card px-3 py-2.5 text-sm" role="status">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-muted-foreground">{spotifyResult.summary}</span>
+            <a className="font-medium underline underline-offset-4" href={spotifyResult.playlistUrl} target="_blank" rel="noopener noreferrer">
+              {spotifyText.openPlaylist}
+            </a>
+          </p>
+          {spotifyResult.notFound.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer font-medium">{spotifyText.notFoundTitle} ({spotifyResult.notFound.length})</summary>
+              <p className="mt-1 text-muted-foreground">{spotifyText.notFoundHint}</p>
+              <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+                {spotifyResult.notFound.map((record) => (
+                  <li key={record.id}>
+                    <button type="button" className="text-left underline-offset-4 hover:underline" onClick={() => setEditingRecord(record)}>
+                      {record.artist ?? '-'} — {record.title ?? '-'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
 
       {view === 'inventory' && (selectedSyncIds.size > 0 || isSyncLoading) && (
         <div className="mb-3 flex flex-col gap-3 rounded-md border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
@@ -1687,6 +1820,10 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
                                     >
                                       <img src={value} alt={t.originalPhoto} className="max-h-36 max-w-36 rounded-sm border object-contain" loading="lazy" />
                                     </button>
+                                  ) : key === 'spotify_album_id' && typeof value === 'string' ? (
+                                    <a className="underline underline-offset-4" href={spotifyAlbumUrl(value)} target="_blank" rel="noopener noreferrer">
+                                      {spotifyText.openOnSpotify}
+                                    </a>
                                   ) : key === 'created_at' && typeof value === 'string' ? (
                                     new Date(value).toLocaleString(language === 'pt' ? 'pt-BR' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })
                                   ) : displayDetailValue(value)}

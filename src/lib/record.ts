@@ -35,6 +35,8 @@ export type VinylRecord = {
   marketplace_currency?: string | null
   notes?: string | null
   discogs_link?: string | null
+  spotify_album_id?: string | null
+  spotify_matched_at?: string | null
   created_at?: string | null
   [key: string]: unknown
 }
@@ -49,4 +51,15 @@ export function storeExclusion(record: VinylRecord): 'sold' | 'notForSale' | 'no
 /** A record counts as on Facebook Marketplace once it has a listing URL or a Marketplace price. */
 export function isOnFacebookMarketplace(record: VinylRecord) {
   return Boolean(record.source_url?.includes('facebook.com')) || record.marketplace_price != null
+}
+
+/** Loose text for matching names across Discogs/Spotify: no accents, case, punctuation or "and". */
+export function normalizeMatchText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\band\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 }
