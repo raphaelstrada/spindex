@@ -62,7 +62,8 @@ import { translations, type Language } from '@/lib/i18n'
 import { isOnFacebookMarketplace, normalizeMatchText, storeExclusion, type VinylRecord } from '@/lib/record'
 import { AdminDashboard } from '@/components/AdminDashboard'
 import { CollectionGaps } from '@/components/CollectionGaps'
-import { connectSpotify, disconnectSpotify, isSpotifyConfigured, isSpotifyConnected, matchSpotifyAlbum, saveAlbumsToLibrary, SPOTIFY_PLAYLIST_NAME, spotifyAlbumUrl, syncPlaylist } from '@/lib/spotify'
+import { detectSetupIssue, showSetupIssue } from '@/lib/setupIssues'
+import { disconnectSpotify, ensureSpotifyReady, isSpotifyConnected, matchSpotifyAlbum, saveAlbumsToLibrary, SPOTIFY_PLAYLIST_NAME, spotifyAlbumUrl, syncPlaylist } from '@/lib/spotify'
 
 const visibleRecordFields = new Set([
   'image_url', 'original_image_url', 'artist', 'title', 'year_pressed', 'catalog_number', 'country_pressed',
@@ -239,8 +240,6 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
         discogsSyncSelected: translations.pt.table.discogsSyncSelected,
         clearSyncSelection: translations.pt.table.clearSyncSelection,
         syncingWithDiscogs: translations.pt.table.syncingWithDiscogs,
-        discogsTokenPrompt: translations.pt.table.discogsTokenPrompt,
-        discogsTokenInvalid: translations.pt.table.discogsTokenInvalid,
         noReleaseForSync: translations.pt.table.noReleaseForSync,
         syncSummary: translations.pt.table.syncSummary,
         removeFromDiscogs: translations.pt.table.removeFromDiscogs,
@@ -261,8 +260,6 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
         discogsSyncSelected: translations.en.table.discogsSyncSelected,
         clearSyncSelection: translations.en.table.clearSyncSelection,
         syncingWithDiscogs: translations.en.table.syncingWithDiscogs,
-        discogsTokenPrompt: translations.en.table.discogsTokenPrompt,
-        discogsTokenInvalid: translations.en.table.discogsTokenInvalid,
         noReleaseForSync: translations.en.table.noReleaseForSync,
         syncSummary: translations.en.table.syncSummary,
         removeFromDiscogs: translations.en.table.removeFromDiscogs,
@@ -429,22 +426,29 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
     setData((current) => current.map((item) => item.id === recordId ? { ...item, sale_price_cad: salePrice } : item))
   }
 
-  // Price suggestions need the admin's own Discogs token: ask for it like the collection sync does.
+  // A missing/invalid Discogs token opens the setup dialog, which asks for a new one and saves it.
+  // Returns true when the token was saved and the action can be retried.
+  async function askForDiscogsToken(message: string) {
+    const tokenProblem = getDiscogsTokenProblem(message)
+    if (!tokenProblem) return false
+    const newToken = await showSetupIssue(tokenProblem === 'missing' ? 'discogsTokenMissing' : 'discogsTokenInvalid')
+    if (typeof newToken !== 'string') return false
+    try {
+      await saveDiscogsToken(newToken)
+      return true
+    } catch (saveError) {
+      alert(`${t.updateFailed} ${saveError instanceof Error ? saveError.message : String(saveError)}`)
+      return false
+    }
+  }
+
+  // Price suggestions need the admin's own Discogs token and seller settings.
   // Returns true when the lookup can be retried.
   async function handlePriceLookupProblem(message: string) {
-    const tokenProblem = getDiscogsTokenProblem(message)
-    if (tokenProblem) {
-      const newToken = window.prompt(tokenProblem === 'missing' ? syncUiText.discogsTokenPrompt : syncUiText.discogsTokenInvalid)?.trim() ?? ''
-      if (!newToken) return false
-      try {
-        await saveDiscogsToken(newToken)
-        return true
-      } catch (saveError) {
-        alert(`${t.updateFailed} ${saveError instanceof Error ? saveError.message : String(saveError)}`)
-        return false
-      }
-    }
-    alert(message.includes('DISCOGS_SELLER_SETTINGS_MISSING') ? t.discogsSellerSettingsMissing : `${t.updateFailed} ${message}`)
+    if (getDiscogsTokenProblem(message)) return askForDiscogsToken(message)
+    const issue = detectSetupIssue(message)
+    if (issue) await showSetupIssue(issue, message)
+    else alert(`${t.updateFailed} ${message}`)
     return false
   }
 
@@ -608,12 +612,8 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
   // Matches the records still owned (not sold) on Spotify, saves the albums to the library and
   // rebuilds the "Spindex – My vinyl" playlist. Only album ids are stored in the database.
   async function syncWithSpotify() {
-    if (!isSpotifyConfigured()) {
-      alert(spotifyText.notConfigured)
-      return
-    }
-    if (!isSpotifyConnected(owner)) {
-      await connectSpotify(owner)
+    if (!await ensureSpotifyReady(owner)) {
+      setSpotifyConnectionVersion((version) => version + 1)
       return
     }
 
@@ -659,11 +659,15 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      setSpotifyProgress(null)
       if (message === 'SPOTIFY_NOT_CONNECTED') {
-        await connectSpotify(owner)
+        setSpotifyConnectionVersion((version) => version + 1)
+        await ensureSpotifyReady(owner)
         return
       }
-      alert(`${spotifyText.failed} ${message}`)
+      const issue = detectSetupIssue(message)
+      if (issue) await showSetupIssue(issue, message)
+      else alert(`${spotifyText.failed} ${message}`)
     } finally {
       setSpotifyProgress(null)
     }
@@ -834,22 +838,19 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
     } catch (error) {
       console.error('Discogs sync failed:', error)
       const message = error instanceof Error ? error.message : String(error)
-      const tokenProblem = getDiscogsTokenProblem(message)
-      if (tokenProblem) {
-        const promptText = tokenProblem === 'missing' ? syncUiText.discogsTokenPrompt : syncUiText.discogsTokenInvalid
-        const newToken = window.prompt(promptText)?.trim() ?? ''
-        if (newToken) {
-          try {
-            await saveDiscogsToken(newToken)
-          } catch (saveError) {
-            setSyncSummary(`⚠️ ${saveError instanceof Error ? saveError.message : String(saveError)}`)
-            return
-          }
+      if (getDiscogsTokenProblem(message)) {
+        if (await askForDiscogsToken(message)) {
           setSyncSummary(null)
           setIsSyncLoading(false)
           setSyncProgress(null)
           return runDiscogsSync(action, explicitRecords)
         }
+        return
+      }
+      const issue = detectSetupIssue(message)
+      if (issue) {
+        void showSetupIssue(issue, message)
+        return
       }
       setSyncSummary(`⚠️ ${message}`)
     } finally {
@@ -906,16 +907,8 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       console.error('Mirroring the release change on Discogs failed:', error)
       const tokenProblem = getDiscogsTokenProblem(message)
       if (tokenProblem && !isRetry) {
-        const promptText = tokenProblem === 'missing' ? text.discogsTokenPrompt : text.discogsTokenInvalid
-        const newToken = window.prompt(promptText)?.trim() ?? ''
-        if (newToken) {
-          try {
-            await saveDiscogsToken(newToken)
-            return await mirrorReleaseChangeToDiscogs(recordId, oldReleaseId, newReleaseId, true)
-          } catch (saveError) {
-            setSyncSummary(`⚠️ ${saveError instanceof Error ? saveError.message : String(saveError)}`)
-            return
-          }
+        if (await askForDiscogsToken(message)) {
+          return await mirrorReleaseChangeToDiscogs(recordId, oldReleaseId, newReleaseId, true)
         }
         if (tokenProblem === 'missing') {
           setSyncSummary(`⚠️ ${text.releaseChangeNoToken.replace('{url}', oldReleaseUrl)}`)

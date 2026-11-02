@@ -22,9 +22,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { friendlyErrorMessage } from '@/lib/setupIssues'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
-import { parseSpotifyAlbumId, spotifyAlbumUrl } from '@/lib/spotify'
+import { ensureSpotifyReady, parseSpotifyAlbumId, searchSpotifyAlbums, spotifyAlbumUrl, syncRecordAlbum, type SpotifyAlbumCandidate } from '@/lib/spotify'
+import { detectSetupIssue, showSetupIssue } from '@/lib/setupIssues'
+import { SpotifyAlbumPicker } from '@/components/SpotifyAlbumPicker'
 
 function getLevenshteinDistance(a: string, b: string): number {
   const matrix: number[][] = []
@@ -167,6 +170,8 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
   const [pickerCandidates, setPickerCandidates] = useState<DiscogsRelease[]>([])
   const [pickerLoading, setPickerLoading] = useState(false)
   const [pickerError, setPickerError] = useState<string | null>(null)
+  const spotifySearchId = useRef(0)
+  const [spotifyPicker, setSpotifyPicker] = useState<{ key: number; query: string; isLoading: boolean; error: string | null; candidates: SpotifyAlbumCandidate[] } | null>(null)
   const pickerRequestRef = useRef(0)
 
   function skipRecord() {
@@ -282,6 +287,9 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       marketplace_currency: valuesToSave.marketplace_currency || null,
       hero_tagline: valuesToSave.hero_tagline?.trim() || null,
       spotify_album_id: valuesToSave.spotify_album_id ?? null,
+      ...((valuesToSave.spotify_album_id ?? null) !== (record?.spotify_album_id ?? null)
+        ? { spotify_matched_at: valuesToSave.spotify_album_id ? new Date().toISOString() : null }
+        : {}),
       ...(releaseChanged ? { discogs_synced_at: null } : {}),
     }
     const { error } = record
@@ -294,12 +302,72 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       return
     }
 
+    void syncSpotifyAfterSave(record ?? null, databaseValues.spotify_album_id, Boolean(valuesToSave.sold))
+
     if (onSaveAndNext) {
       onSaveAndNext(valuesToSave, addToDiscogsCollection)
       return
     }
 
     onSuccess?.(valuesToSave)
+  }
+
+  // After saving: mirror the record's Spotify album in "Your Library" and the Spindex playlist.
+  // Sold records leave the playlist. Never blocks the save; problems open the setup dialog.
+  async function syncSpotifyAfterSave(previous: VinylRecord | null, albumId: string | null, sold: boolean) {
+    const target = sold ? null : albumId
+    const previousInPlaylist = previous && !previous.sold ? previous.spotify_album_id ?? null : null
+    if (target === previousInPlaylist) return
+    if (!await ensureSpotifyReady(owner)) return
+
+    try {
+      let previousStillUsed = false
+      if (previousInPlaylist) {
+        const { count } = await supabase
+          .from('vinyl_records')
+          .select('id', { count: 'exact', head: true })
+          .eq('collection_owner', owner)
+          .eq('spotify_album_id', previousInPlaylist)
+          .eq('sold', false)
+          .neq('id', previous?.id ?? '')
+        previousStillUsed = (count ?? 0) > 0
+      }
+      await syncRecordAlbum(owner, target, previousInPlaylist, previousStillUsed)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const issue = detectSetupIssue(message)
+      if (issue) await showSetupIssue(issue, message)
+      else alert(`${t.spotifySyncFailed} ${message}`)
+    }
+  }
+
+  async function openSpotifyPicker() {
+    const artist = form.getValues('artist').trim()
+    const title = form.getValues('title').trim()
+    if (!artist || !title) {
+      form.setError('spotify_album_id', { message: t.spotifySearchNeedsArtist })
+      return
+    }
+    if (!await ensureSpotifyReady(owner)) return
+
+    spotifySearchId.current += 1
+    const key = spotifySearchId.current
+    const query = `${artist} – ${title}`
+    setSpotifyPicker({ key, query, isLoading: true, error: null, candidates: [] })
+    try {
+      const yearValue = Number(form.getValues('year_pressed'))
+      const candidates = await searchSpotifyAlbums(owner, artist, title, Number.isFinite(yearValue) && yearValue > 0 ? yearValue : null)
+      setSpotifyPicker((current) => current?.key === key ? { ...current, isLoading: false, candidates } : current)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const issue = detectSetupIssue(message)
+      if (issue) {
+        setSpotifyPicker(null)
+        await showSetupIssue(issue, message)
+        return
+      }
+      setSpotifyPicker((current) => current?.key === key ? { ...current, isLoading: false, error: t.spotifySearchFailed } : current)
+    }
   }
 
   async function handleUpdateExisting() {
@@ -316,6 +384,9 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       marketplace_currency: pendingFormValues.marketplace_currency || null,
       hero_tagline: pendingFormValues.hero_tagline?.trim() || null,
       spotify_album_id: parseSpotifyAlbumId(pendingFormValues.spotify_album_id),
+      ...(parseSpotifyAlbumId(pendingFormValues.spotify_album_id) !== (duplicateRecord.spotify_album_id ?? null)
+        ? { spotify_matched_at: parseSpotifyAlbumId(pendingFormValues.spotify_album_id) ? new Date().toISOString() : null }
+        : {}),
     }
 
     const { error } = await supabase
@@ -329,6 +400,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       return
     }
 
+    void syncSpotifyAfterSave(duplicateRecord, databaseValues.spotify_album_id, Boolean(pendingFormValues.sold))
     setDuplicateRecord(null)
     setPendingFormValues(null)
     onSuccess?.({ ...pendingFormValues, spotify_album_id: databaseValues.spotify_album_id ?? undefined })
@@ -390,7 +462,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       const results = await search()
       if (requestId === pickerRequestRef.current) setPickerCandidates(results)
     } catch (error) {
-      if (requestId === pickerRequestRef.current) setPickerError(error instanceof Error ? error.message : t.discogsSearchError)
+      if (requestId === pickerRequestRef.current) setPickerError(error instanceof Error ? friendlyErrorMessage(error.message, t.discogsSearchError) : t.discogsSearchError)
     } finally {
       if (requestId === pickerRequestRef.current) {
         setPickerLoading(false)
@@ -861,7 +933,17 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
             <FormItem><FormLabel>{t.facebookMarketplaceLink}</FormLabel><FormControl><Input type="url" placeholder="https://www.facebook.com/marketplace/item/..." {...field} /></FormControl><FormMessage /></FormItem>
           )} />
           <FormField control={form.control} name="spotify_album_id" render={({ field }) => (
-            <FormItem><FormLabel>{t.spotifyAlbumUrl}</FormLabel><FormControl><Input type="url" placeholder="https://open.spotify.com/album/..." {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem>
+              <FormLabel>{t.spotifyAlbumUrl}</FormLabel>
+              <div className="flex gap-2">
+                <FormControl><Input type="url" className="min-w-0 flex-1" placeholder="https://open.spotify.com/album/..." {...field} /></FormControl>
+                <Button type="button" variant="outline" className="shrink-0" onClick={() => void openSpotifyPicker()} disabled={spotifyPicker?.isLoading}>
+                  {spotifyPicker?.isLoading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Search aria-hidden="true" />}
+                  {t.searchSpotify}
+                </Button>
+              </div>
+              <FormMessage />
+            </FormItem>
           )} />
         </div>
 
@@ -1158,6 +1240,23 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {spotifyPicker && (
+        <SpotifyAlbumPicker
+          key={spotifyPicker.key}
+          language={language}
+          open
+          query={spotifyPicker.query}
+          isLoading={spotifyPicker.isLoading}
+          error={spotifyPicker.error}
+          candidates={spotifyPicker.candidates}
+          initialSelectedId={parseSpotifyAlbumId(form.getValues('spotify_album_id'))}
+          onOpenChange={(open) => { if (!open) setSpotifyPicker(null) }}
+          onConfirm={(album) => {
+            form.setValue('spotify_album_id', spotifyAlbumUrl(album.id), { shouldDirty: true, shouldValidate: true })
+            setSpotifyPicker(null)
+          }}
+        />
+      )}
     </Form>
     </>
   )

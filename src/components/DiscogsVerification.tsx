@@ -13,6 +13,7 @@ import {
   type KeyField,
   type UpdatableField,
 } from '@/lib/discogsVerification'
+import { reportSetupIssue } from '@/lib/setupIssues'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 import { supabase } from '@/lib/supabase'
@@ -54,7 +55,8 @@ export function DiscogsVerification({ language, onRecordsChanged }: { language: 
     try {
       await verification.start()
     } catch (error) {
-      alert(`${t.startError} ${error instanceof Error ? error.message : ''}`)
+      const message = error instanceof Error ? error.message : ''
+      if (!reportSetupIssue(message)) alert(`${t.startError} ${message}`)
     } finally {
       setIsStarting(false)
     }

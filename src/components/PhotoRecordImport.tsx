@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { supabase } from '@/lib/supabase'
 import { countryRank, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
+import { detectSetupIssue, reportSetupIssue } from '@/lib/setupIssues'
 import { translations, type Language } from '@/lib/i18n'
 import type { VinylRecord } from '@/lib/record'
 
@@ -414,7 +415,9 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
             results = [...canadianResults, ...results]
           }
         } catch (searchError) {
-          discogsError = searchError instanceof Error ? searchError.message : t.discogsSearchFailed
+          const message = searchError instanceof Error ? searchError.message : t.discogsSearchFailed
+          // Setup problems are explained by the setup dialog (opened by the Discogs client).
+          discogsError = detectSetupIssue(message) ? t.discogsSearchFailed : message
         }
 
         const candidates = rankReleases(results, detected)
@@ -430,7 +433,9 @@ export function PhotoRecordImport({ language, onRecordSaved, onClose }: {
       setCurrentIndex(0)
       setStage('review')
     } catch (identifyError) {
-      setError(identifyError instanceof Error ? identifyError.message : t.identificationFailed)
+      const message = identifyError instanceof Error ? identifyError.message : t.identificationFailed
+      // A missing Gemini key / Discogs setup opens the setup dialog instead of a raw error.
+      setError(reportSetupIssue(message) ? null : message)
     } finally {
       setProgress('')
       setIsIdentifying(false)

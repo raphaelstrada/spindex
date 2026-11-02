@@ -3,6 +3,7 @@ import { ChevronDown, LoaderCircle, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useCollectionOwner } from '@/lib/collection'
 import { getArtistDiscography, getDiscogsReleaseId, type DiscogsArtistAlbum } from '@/lib/discogs'
+import { detectSetupIssue } from '@/lib/setupIssues'
 import { translations, type Language } from '@/lib/i18n'
 import { normalizeMatchText, type VinylRecord } from '@/lib/record'
 
@@ -86,7 +87,9 @@ export function CollectionGaps({ records, language }: { records: VinylRecord[]; 
         // The cache only saves Discogs calls.
       }
     } catch (findError) {
-      setError(`${t.failed} ${findError instanceof Error ? findError.message : String(findError)}`)
+      const message = findError instanceof Error ? findError.message : String(findError)
+      // Setup problems are explained by the setup dialog (opened by the Discogs client).
+      setError(detectSetupIssue(message) ? null : `${t.failed} ${message}`)
     } finally {
       setProgress(null)
     }

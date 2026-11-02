@@ -3,6 +3,7 @@ import { DiscogsCandidatePicker } from '@/components/DiscogsCandidatePicker'
 import { RecordForm } from '@/components/RecordForm'
 import { Button } from '@/components/ui/button'
 import { searchDiscogsByBarcode, valuesFromRelease, type DiscogsRelease } from '@/lib/discogs'
+import { friendlyErrorMessage } from '@/lib/setupIssues'
 import { translations, type Language } from '@/lib/i18n'
 
 /** After a barcode scan: Discogs matches first (same box as the photo import), then the record form. */
@@ -72,7 +73,7 @@ export function BarcodeRecordImport({
         language={language}
         title={photo.discogsOptions}
         hint={photo.canadianFirst}
-        error={error}
+        error={error && friendlyErrorMessage(error, photo.discogsSearchFailed)}
         isLoading={isLoading}
         loadingLabel={app.barcodeSearching}
         candidates={candidates}

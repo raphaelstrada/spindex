@@ -4,6 +4,7 @@ import { RecordForm } from '@/components/RecordForm'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { searchDiscogsByCatalogNumber, valuesFromRelease, type DiscogsRelease } from '@/lib/discogs'
+import { friendlyErrorMessage } from '@/lib/setupIssues'
 import { translations, type Language } from '@/lib/i18n'
 
 /** Catalog number -> fuzzy Discogs matches (exact first, then pressing country) -> record form. Same flow as the barcode import. */
@@ -48,7 +49,7 @@ export function CatalogNumberRecordImport({
       // Results are ranked by match quality: preselect the best one.
       setSelectedId(results[0] ? String(results[0].id) : null)
     } catch (searchError) {
-      setError(searchError instanceof Error ? searchError.message : String(searchError))
+      setError(friendlyErrorMessage(searchError instanceof Error ? searchError.message : String(searchError), photo.discogsSearchFailed))
     } finally {
       setIsLoading(false)
     }

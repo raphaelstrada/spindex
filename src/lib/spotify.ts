@@ -1,4 +1,5 @@
 import { normalizeMatchText, type VinylRecord } from '@/lib/record'
+import { showSetupIssue } from '@/lib/setupIssues'
 
 // Authorization Code + PKCE, entirely in the browser: no client secret exists anywhere.
 // The Spotify tokens stay in this browser (per admin owner) and are never sent to Supabase.
@@ -45,8 +46,19 @@ export function disconnectSpotify(owner: string) {
 }
 
 // Spotify must have this exact URL registered as a redirect URI.
-function redirectUri() {
+export function spotifyRedirectUri() {
   return `${window.location.origin}${import.meta.env.BASE_URL}admin`
+}
+
+/** Spotify rejects "localhost" redirect URIs; locally the admin must run on 127.0.0.1. */
+export function isOnLocalhost() {
+  return window.location.hostname === 'localhost'
+}
+
+export function loopbackAdminUrl() {
+  const url = new URL(window.location.href)
+  url.hostname = '127.0.0.1'
+  return url.href
 }
 
 function randomString(length: number) {
@@ -67,7 +79,7 @@ export async function connectSpotify(owner: string) {
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     response_type: 'code',
-    redirect_uri: redirectUri(),
+    redirect_uri: spotifyRedirectUri(),
     code_challenge_method: 'S256',
     code_challenge: await codeChallenge(verifier),
     scope: SCOPES,
@@ -114,7 +126,7 @@ export async function completeSpotifyLogin(): Promise<boolean> {
   const token = await requestToken({
     grant_type: 'authorization_code',
     code,
-    redirect_uri: redirectUri(),
+    redirect_uri: spotifyRedirectUri(),
     code_verifier: pending.verifier,
   })
   if (!token.refreshToken) throw new Error('Spotify did not return a refresh token.')
@@ -136,6 +148,22 @@ async function accessToken(owner: string, forceRefresh = false) {
     writeToken(owner, null)
     throw new Error('SPOTIFY_NOT_CONNECTED')
   }
+}
+
+/**
+ * True when Spotify can be used right now. Otherwise explains what is missing in the setup dialog
+ * (Client ID, 127.0.0.1 instead of localhost, connecting the account) and returns false.
+ */
+export async function ensureSpotifyReady(owner: string) {
+  if (isSpotifyConfigured() && isSpotifyConnected(owner)) return true
+  if (!isSpotifyConfigured()) {
+    await showSetupIssue('spotifyNotConfigured')
+  } else if (isOnLocalhost()) {
+    if (await showSetupIssue('spotifyWrongHost') === true) window.location.assign(loopbackAdminUrl())
+  } else if (await showSetupIssue('spotifyConnect') === true) {
+    await connectSpotify(owner)
+  }
+  return false
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -243,4 +271,95 @@ export async function syncPlaylist(owner: string, albumIds: string[], onProgress
     await spotifyFetch(owner, `/playlists/${playlistId}/items`, { method: 'POST', body: JSON.stringify({ uris: uris.slice(index, index + 100) }) })
   }
   return { playlistUrl: `https://open.spotify.com/playlist/${playlistId}`, trackCount: uris.length }
+}
+
+export type SpotifyAlbumCandidate = {
+  id: string
+  name: string
+  artists: string
+  year: number | null
+  albumType: string
+  totalTracks: number | null
+  image: string | null
+  url: string
+  /** Same artist and title as the record (after normalizing). */
+  exactMatch: boolean
+}
+
+type SpotifySearchAlbum = SpotifyAlbum & { total_tracks?: number; images?: { url: string; width?: number }[]; external_urls?: { spotify?: string } }
+
+/** Probable albums for the record picker: exact artist + title matches first, then the record's year. */
+export async function searchSpotifyAlbums(owner: string, artist: string, title: string, year?: number | null): Promise<SpotifyAlbumCandidate[]> {
+  const search = async (q: string) => (await spotifyFetch<{ albums: { items: SpotifySearchAlbum[] } }>(
+    owner,
+    `/search?${new URLSearchParams({ q, type: 'album', limit: '10' })}`,
+  )).albums?.items ?? []
+
+  const cleanArtist = artist.replace(/"/g, '').trim()
+  const cleanTitle = title.replace(/"/g, '').trim()
+  // Field filters are precise but strict; fall back to free text when they find nothing.
+  let albums = cleanArtist && cleanTitle ? await search(`album:"${cleanTitle}" artist:"${cleanArtist}"`) : []
+  if (albums.length === 0) albums = await search(`${cleanArtist} ${cleanTitle}`.trim())
+
+  const normalizedArtist = normalizeMatchText(artist)
+  const normalizedTitle = normalizeMatchText(title)
+  const candidates = albums.filter(Boolean).map((album) => {
+    const releaseYear = Number(album.release_date?.slice(0, 4))
+    return {
+      id: album.id,
+      name: album.name,
+      artists: album.artists.map((albumArtist) => albumArtist.name).join(', '),
+      year: Number.isFinite(releaseYear) && releaseYear > 0 ? releaseYear : null,
+      albumType: album.album_type,
+      totalTracks: album.total_tracks ?? null,
+      // Spotify lists images largest first; the smallest one above 64px is enough for a thumbnail.
+      image: [...(album.images ?? [])].reverse().find((image) => (image.width ?? 300) >= 64)?.url ?? album.images?.[0]?.url ?? null,
+      url: album.external_urls?.spotify ?? spotifyAlbumUrl(album.id),
+      exactMatch: normalizeMatchText(album.name) === normalizedTitle
+        && album.artists.some((albumArtist) => normalizeMatchText(albumArtist.name) === normalizedArtist),
+    }
+  })
+  const score = (candidate: SpotifyAlbumCandidate) =>
+    Number(candidate.exactMatch) * 4 + Number(year != null && candidate.year === year) * 2 + Number(candidate.albumType === 'album')
+  // Stable sort keeps Spotify's relevance order inside each score.
+  return candidates.sort((left, right) => score(right) - score(left))
+}
+
+async function playlistTrackUris(owner: string, playlistId: string) {
+  const uris = new Set<string>()
+  let next: string | null = `/playlists/${playlistId}/items?${new URLSearchParams({ limit: '50', fields: 'items(item(uri)),next' })}`
+  while (next) {
+    const page: { items?: { item?: { uri?: string } | null }[]; next: string | null } = await spotifyFetch(owner, next)
+    for (const entry of page.items ?? []) if (entry.item?.uri) uris.add(entry.item.uri)
+    next = page.next
+  }
+  return uris
+}
+
+/**
+ * After a record's Spotify album is saved: adds the album to "Your Library" and its missing tracks to
+ * the Spindex playlist. When the record pointed to another album before (and no other record uses
+ * it), that album is removed from both, so the playlist keeps mirroring the collection.
+ */
+export async function syncRecordAlbum(owner: string, albumId: string | null, previousAlbumId: string | null, previousStillUsed: boolean) {
+  const playlistId = await findOrCreatePlaylist(owner)
+
+  if (previousAlbumId && previousAlbumId !== albumId && !previousStillUsed) {
+    const oldTracks = await albumTrackUris(owner, previousAlbumId)
+    for (let index = 0; index < oldTracks.length; index += 100) {
+      await spotifyFetch(owner, `/playlists/${playlistId}/items`, {
+        method: 'DELETE',
+        body: JSON.stringify({ items: oldTracks.slice(index, index + 100).map((uri) => ({ uri })) }),
+      })
+    }
+    await spotifyFetch(owner, `/me/library?${new URLSearchParams({ uris: `spotify:album:${previousAlbumId}` })}`, { method: 'DELETE' })
+  }
+
+  if (!albumId) return
+  await saveAlbumsToLibrary(owner, [albumId])
+  const existing = await playlistTrackUris(owner, playlistId)
+  const missing = (await albumTrackUris(owner, albumId)).filter((uri) => !existing.has(uri))
+  for (let index = 0; index < missing.length; index += 100) {
+    await spotifyFetch(owner, `/playlists/${playlistId}/items`, { method: 'POST', body: JSON.stringify({ uris: missing.slice(index, index + 100) }) })
+  }
 }

@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import type { CollectionOwner } from '@/lib/collection'
 import type { VinylRecord } from '@/lib/record'
+import { detectSetupIssue } from '@/lib/setupIssues'
 
 /** Identify the pressing: never updated from Discogs, only reported when they differ. */
 export const KEY_FIELDS = ['catalog_number', 'artist', 'year_pressed', 'country_pressed'] as const
@@ -176,6 +177,11 @@ export function useDiscogsVerification(owner: CollectionOwner) {
             }
           } catch (lookupError) {
             const message = lookupError instanceof Error ? lookupError.message : String(lookupError)
+            // A setup problem (explained by the setup dialog) would fail every record: stop here.
+            if (detectSetupIssue(message)) {
+              update((current) => ({ ...current, status: 'done', finishedAt: new Date().toISOString() }))
+              return
+            }
             if (/\b429\b/.test(message) && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
               rateLimitRetries += 1
               await wait(RATE_LIMIT_WAIT_MS)

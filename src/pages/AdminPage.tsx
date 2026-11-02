@@ -25,6 +25,8 @@ import { translations, type Language } from '@/lib/i18n'
 import { Logo } from '@/components/Logo'
 import { supabase } from '@/lib/supabase'
 import { completeSpotifyLogin } from '@/lib/spotify'
+import { showSetupIssue } from '@/lib/setupIssues'
+import { SetupIssueDialog } from '@/components/SetupIssueDialog'
 
 type AddRecordPath = 'picture' | 'catalogNumber' | 'discogsUrl' | 'manual' | 'barcode' | null
 
@@ -51,14 +53,13 @@ export default function AdminPage() {
   }, [view])
 
   // Spotify redirects back here (?code=&state=) after "Connect Spotify"; the sync then picks up the token.
-  const spotifyLoginFailed = t.spotify.loginFailed
   useEffect(() => {
     completeSpotifyLogin()
       .then((connected) => {
         if (connected) setRecordsVersion((version) => version + 1)
       })
-      .catch((error) => alert(`${spotifyLoginFailed} ${error instanceof Error ? error.message : String(error)}`))
-  }, [spotifyLoginFailed])
+      .catch((error) => void showSetupIssue('spotifyLoginFailed', error instanceof Error ? error.message : String(error)))
+  }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -283,6 +284,7 @@ export default function AdminPage() {
         </div>
       </header>
       <DataTable language={language} recordsVersion={recordsVersion} view={view} />
+      <SetupIssueDialog language={language} />
     </div>
   )
 }

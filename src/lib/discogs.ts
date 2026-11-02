@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import type { VinylRecord } from '@/lib/record'
+import { reportSetupIssue, showSetupIssue } from '@/lib/setupIssues'
 
 export type DiscogsRelease = {
   id: number
@@ -151,13 +152,7 @@ export async function searchDiscogsReleases(
     { body: { artist, title, releaseUrl, ...filters } },
   )
 
-  if (error) {
-    if (error.context instanceof Response) {
-      const details = await error.context.json().catch(() => null) as { error?: string } | null
-      throw new Error(details?.error || error.message)
-    }
-    throw new Error(error.message)
-  }
+  if (error) throw await discogsSearchError(error)
   return sortReleasesByCountryPriority(data?.results ?? [])
 }
 
@@ -232,13 +227,7 @@ export async function getArtistDiscography(releaseId: number): Promise<{ artistI
     { body: { artistGapsReleaseId: releaseId } },
   )
 
-  if (error) {
-    if (error.context instanceof Response) {
-      const details = await error.context.json().catch(() => null) as { error?: string } | null
-      throw new Error(details?.error || error.message)
-    }
-    throw new Error(error.message)
-  }
+  if (error) throw await discogsSearchError(error)
 
   return data ?? { artistId: null, artistName: null, items: [] }
 }
@@ -249,13 +238,7 @@ export async function getDiscogsMarketStats(releaseId: number): Promise<DiscogsP
     { body: { priceReleaseId: releaseId } },
   )
 
-  if (error) {
-    if (error.context instanceof Response) {
-      const details = await error.context.json().catch(() => null) as { error?: string } | null
-      throw new Error(details?.error || error.message)
-    }
-    throw new Error(error.message)
-  }
+  if (error) throw await discogsSearchError(error)
 
   return data ?? { lowestPrice: null, currency: 'USD', listingsCount: null, suggestions: null }
 }
@@ -279,6 +262,28 @@ export type DiscogsSyncResponse = {
   results: DiscogsSyncResult[]
 }
 
+// Server setup problems (no Discogs credentials, function not deployed) open the setup dialog
+// for every caller; the Error is still thrown so each caller stops what it was doing.
+function reportServerSetupProblem(functionName: string, rawBody: string, message: string) {
+  if (/Requested function was not found/i.test(rawBody)) void showSetupIssue('functionNotDeployed', functionName)
+  else if (/Discogs is not configured|not configured to read Discogs tokens/i.test(message)) reportSetupIssue(message)
+}
+
+async function discogsSearchError(error: { message: string; context?: unknown }): Promise<Error> {
+  if (error.context instanceof Response) {
+    const rawBody = await error.context.text().catch(() => '')
+    let message = error.message
+    try {
+      message = (JSON.parse(rawBody) as { error?: string })?.error || message
+    } catch {
+      // keep the generic message
+    }
+    reportServerSetupProblem('discogs-search', rawBody, message)
+    return new Error(message)
+  }
+  return new Error(error.message)
+}
+
 async function extractFunctionError(error: unknown, functionName: string): Promise<Error> {
   // The function was invoked and returned an HTTP error: read status + body.
   const context = (error as { context?: unknown } | null)?.context
@@ -293,6 +298,7 @@ async function extractFunctionError(error: unknown, functionName: string): Promi
       // keep raw body
     }
 
+    reportServerSetupProblem(functionName, rawBody, detail)
     if (status === 404) {
       return new Error(
         `[${functionName}] HTTP 404: function not deployed. Run "supabase functions deploy ${functionName}". ${detail}`.trim(),
