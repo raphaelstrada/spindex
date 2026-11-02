@@ -129,12 +129,13 @@ function createFormSchema(language: Language) {
 type FormInput = z.input<ReturnType<typeof createFormSchema>>
 type FormValues = z.output<ReturnType<typeof createFormSchema>>
 
-export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, startWithDiscogsUrl = false, onUploadPicture, onUploadOriginalImage, onSuccess, onSaveAndNext, onSkip }: {
+export function RecordForm({ language, record, initialValues, showTopSaveButton = false, autoSearchDiscogs = false, autoSearchSpotify = false, startWithDiscogsUrl = false, onUploadPicture, onUploadOriginalImage, onSuccess, onSaveAndNext, onSkip }: {
   language: Language
   record?: VinylRecord
   initialValues?: Partial<VinylRecord>
   showTopSaveButton?: boolean
   autoSearchDiscogs?: boolean
+  autoSearchSpotify?: boolean
   startWithDiscogsUrl?: boolean
   onUploadPicture?: () => void
   onUploadOriginalImage?: () => Promise<string>
@@ -486,6 +487,15 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     void handleDiscogsSearch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSearchDiscogs])
+
+  // Opened from the dimmed Spotify icon: show the probable albums right away.
+  const autoSpotifyTriggered = useRef(false)
+  useEffect(() => {
+    if (!autoSearchSpotify || autoSpotifyTriggered.current) return
+    autoSpotifyTriggered.current = true
+    void openSpotifyPicker()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSearchSpotify])
 
   const watchedArtist = form.watch('artist')
   const watchedTitle = form.watch('title')
@@ -1254,6 +1264,8 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
           onConfirm={(album) => {
             form.setValue('spotify_album_id', spotifyAlbumUrl(album.id), { shouldDirty: true, shouldValidate: true })
             setSpotifyPicker(null)
+            // Opened from the dimmed Spotify icon: save right away (onSuccess closes the edit dialog).
+            if (autoSearchSpotify) void form.handleSubmit(onSubmit)()
           }}
         />
       )}

@@ -63,7 +63,7 @@ import { isOnFacebookMarketplace, normalizeMatchText, storeExclusion, type Vinyl
 import { AdminDashboard } from '@/components/AdminDashboard'
 import { CollectionGaps } from '@/components/CollectionGaps'
 import { detectSetupIssue, showSetupIssue } from '@/lib/setupIssues'
-import { disconnectSpotify, ensureSpotifyReady, isSpotifyConnected, matchSpotifyAlbum, saveAlbumsToLibrary, SPOTIFY_PLAYLIST_NAME, spotifyAlbumUrl, syncPlaylist } from '@/lib/spotify'
+import { disconnectSpotify, ensureSpotifyReady, isSpotifyConnected, matchSpotifyAlbum, saveAlbumsToLibrary, SPOTIFY_PLAYLIST_NAME, spotifyAlbumUrl, syncPlaylist, syncRecordAlbum } from '@/lib/spotify'
 
 const visibleRecordFields = new Set([
   'image_url', 'original_image_url', 'artist', 'title', 'year_pressed', 'catalog_number', 'country_pressed',
@@ -173,7 +173,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 100 })
   const [previewingRecord, setPreviewingRecord] = useState<VinylRecord | null>(null)
   const [editingRecord, setEditingRecord] = useState<VinylRecord | null>(null)
-  const [editAutoSearch, setEditAutoSearch] = useState(false)
+  const [editAutoSearch, setEditAutoSearch] = useState<'discogs' | 'spotify' | null>(null)
   const [batchSyncRecords, setBatchSyncRecords] = useState<VinylRecord[] | null>(null)
   const [batchSyncIndex, setBatchSyncIndex] = useState(0)
   const [deletingRecord, setDeletingRecord] = useState<VinylRecord | null>(null)
@@ -466,7 +466,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       }
       // No release found: open the edit dialog with Discogs suggestions to pick the right release.
       if (result === 'no-release') {
-        setEditAutoSearch(true)
+        setEditAutoSearch('discogs')
         setEditingRecord(record)
       }
       // The release is known but Discogs has no price suggestion for it: the release is not the problem.
@@ -703,6 +703,30 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       setBatchSyncIndex((index) => index + 1)
     } else {
       closeBatchSync()
+    }
+  }
+
+  // Removes the record's album from "Your Library" and the Spindex playlist (unless another owned
+  // record uses it) and unlinks it, so the row shows the dimmed icon again.
+  async function removeFromSpotify(record: VinylRecord) {
+    const albumId = record.spotify_album_id
+    if (!albumId || !window.confirm(spotifyText.confirmRemove)) return
+    if (!await ensureSpotifyReady(owner)) {
+      setSpotifyConnectionVersion((version) => version + 1)
+      return
+    }
+    try {
+      const stillUsed = data.some((item) => item.id !== record.id && !item.sold && item.spotify_album_id === albumId)
+      if (!stillUsed) await syncRecordAlbum(owner, null, albumId, false)
+      const changes = { spotify_album_id: null, spotify_matched_at: null }
+      const { error } = await supabase.from('vinyl_records').update(changes).eq('id', record.id).eq('collection_owner', owner)
+      if (error) throw error
+      setData((current) => current.map((item) => item.id === record.id ? { ...item, ...changes } : item))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const issue = detectSetupIssue(message)
+      if (issue) await showSetupIssue(issue, message)
+      else alert(`${spotifyText.failed} ${message}`)
     }
   }
 
@@ -1262,7 +1286,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
               aria-label={t.noDiscogsLinkRow}
               title={t.noDiscogsLinkRow}
               onClick={() => {
-                setEditAutoSearch(true)
+                setEditAutoSearch('discogs')
                 setEditingRecord(record)
               }}
             >
@@ -1300,14 +1324,47 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       enableSorting: false,
       size: 44,
       cell: ({ row }) => {
-        const albumId = row.original.spotify_album_id
-        if (!albumId) return null
-        return (
-          <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-brand-green">
-            <a href={spotifyAlbumUrl(albumId)} target="_blank" rel="noopener noreferrer" aria-label={spotifyText.openOnSpotify} title={spotifyText.openOnSpotify}>
+        const record = row.original
+        const albumId = record.spotify_album_id
+
+        // Not linked: dimmed icon, opens the edit dialog with Spotify suggestions.
+        if (!albumId) {
+          return (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              aria-label={spotifyText.noAlbumRow}
+              title={spotifyText.noAlbumRow}
+              onClick={() => {
+                setEditAutoSearch('spotify')
+                setEditingRecord(record)
+              }}
+            >
               <Music aria-hidden="true" />
-            </a>
-          </Button>
+            </Button>
+          )
+        }
+
+        // Linked: green icon, opens a menu to visit the album or remove it from Spotify.
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-brand-green" aria-label={spotifyText.linked} title={spotifyText.linked}>
+                <Music aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center">
+              <DropdownMenuItem asChild>
+                <a href={spotifyAlbumUrl(albumId)} target="_blank" rel="noopener noreferrer">
+                  {spotifyText.visitLink}
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void removeFromSpotify(record)}>
+                {spotifyText.removeFromMyAlbums}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )
       },
     },
@@ -1361,7 +1418,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
               title={t.edit}
               disabled={isPending}
               onClick={() => {
-                setEditAutoSearch(false)
+                setEditAutoSearch(null)
                 setEditingRecord(record)
               }}
             >
@@ -1632,7 +1689,10 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
               <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
                 {spotifyResult.notFound.map((record) => (
                   <li key={record.id}>
-                    <button type="button" className="text-left underline-offset-4 hover:underline" onClick={() => setEditingRecord(record)}>
+                    <button type="button" className="text-left underline-offset-4 hover:underline" onClick={() => {
+                      setEditAutoSearch('spotify')
+                      setEditingRecord(record)
+                    }}>
                       {record.artist ?? '-'} — {record.title ?? '-'}
                     </button>
                   </li>
@@ -1910,7 +1970,8 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
               key={editingRecord.id}
               language={language}
               record={editingRecord}
-              autoSearchDiscogs={editAutoSearch}
+              autoSearchDiscogs={editAutoSearch === 'discogs'}
+              autoSearchSpotify={editAutoSearch === 'spotify'}
               onSuccess={(values) => {
                 const previous = editingRecord
                 const oldReleaseId = getDiscogsReleaseId(previous.discogs_link)
