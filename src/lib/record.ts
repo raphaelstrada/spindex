@@ -9,6 +9,7 @@ export type VinylRecord = {
   original_image_url?: string | null
   source_url?: string | null
   record_label?: string | null
+  record_group?: string | null
   catalog_number?: string | null
   sub_genre?: string | null
   record_type?: string | null

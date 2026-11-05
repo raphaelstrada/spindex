@@ -94,6 +94,7 @@ function createFormSchema(language: Language) {
     artist: z.string().min(1, t.artistRequired),
     title: z.string().min(1, t.titleRequired),
     record_label: z.string().optional(),
+    record_group: z.string().optional(),
     genre: z.string().optional(),
     sub_genre: z.string().optional(),
     record_type: z.string().optional(),
@@ -191,6 +192,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       artist: record?.artist ?? initialValues?.artist ?? '',
       title: record?.title ?? initialValues?.title ?? '',
       record_label: record?.record_label ?? initialValues?.record_label ?? '',
+      record_group: record?.record_group ?? '',
       genre: record?.genre ?? initialValues?.genre ?? '',
       sub_genre: record?.sub_genre ?? initialValues?.sub_genre ?? '',
       record_type: record?.record_type ?? initialValues?.record_type ?? '',
@@ -287,6 +289,7 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       marketplace_price: valuesToSave.marketplace_price ?? null,
       marketplace_currency: valuesToSave.marketplace_currency || null,
       hero_tagline: valuesToSave.hero_tagline?.trim() || null,
+      record_group: valuesToSave.record_group?.trim() || null,
       spotify_album_id: valuesToSave.spotify_album_id ?? null,
       ...((valuesToSave.spotify_album_id ?? null) !== (record?.spotify_album_id ?? null)
         ? { spotify_matched_at: valuesToSave.spotify_album_id ? new Date().toISOString() : null }
@@ -842,6 +845,9 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
           )} />
           <FormField control={form.control} name="sub_genre" render={({ field }) => (
             <FormItem><FormLabel>{t.subGenre}</FormLabel><FormControl><Input placeholder={t.subGenrePlaceholder} {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+          <FormField control={form.control} name="record_group" render={({ field }) => (
+            <FormItem><FormLabel>{t.recordGroup}</FormLabel><FormControl><Input placeholder={t.recordGroupPlaceholder} {...field} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
 

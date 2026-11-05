@@ -26,9 +26,10 @@ export type CatalogRecord = {
   is_hero: boolean | null
   hero_tagline: string | null
   sale_price_cad: number
+  record_group: string | null
 }
 
-const CATALOG_COLUMNS = 'id, collection_owner, artist, title, year_pressed, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, image_url, original_image_url, discogs_link, is_hero, hero_tagline, sale_price_cad'
+const CATALOG_COLUMNS = 'id, collection_owner, artist, title, year_pressed, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, image_url, original_image_url, discogs_link, is_hero, hero_tagline, sale_price_cad, record_group'
 
 const RELATED_LIMIT = 12
 // PostgREST caps each response (1000 rows by default), so the full catalog is read in pages.

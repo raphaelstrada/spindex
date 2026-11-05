@@ -288,7 +288,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
         for (;;) {
           const { data: records, error } = await supabase
             .from('vinyl_records')
-            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, discogs_market_price, discogs_market_currency, discogs_market_condition, discogs_num_for_sale, price_on_discogs, sale_price_cad:record_sale_price_cad, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, spotify_album_id, spotify_matched_at, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
+            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_group, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, discogs_market_price, discogs_market_currency, discogs_market_condition, discogs_num_for_sale, price_on_discogs, sale_price_cad:record_sale_price_cad, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, spotify_album_id, spotify_matched_at, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
             .eq('collection_owner', owner)
             .order('created_at', { ascending: false })
             .order('id', { ascending: true })

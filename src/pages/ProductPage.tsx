@@ -122,6 +122,7 @@ export default function ProductPage() {
     [t.genre, record.genre],
     [t.style, record.sub_genre],
     [t.format, format],
+    [t.group, record.record_group],
     [t.originalPressing, record.is_original === null ? null : (record.is_original ? t.yes : t.no)],
     [t.specialEdition, record.is_special_edition ? (record.special_edition_reason || t.yes) : null],
   ] as [string, string | null][]).filter((entry): entry is [string, string] => Boolean(entry[1]))

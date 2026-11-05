@@ -48,6 +48,7 @@ export default function StorefrontPage() {
     years: distinct(records.map((record) => record.year_pressed)).sort((a, b) => Number(b) - Number(a)),
     conditions: distinct(records.map((record) => record.media_condition)).sort((a, b) => a.localeCompare(b)),
     owners: distinct(records.map((record) => record.collection_owner)).sort((a, b) => a.localeCompare(b)),
+    groups: distinct(records.map((record) => record.record_group)).sort((a, b) => a.localeCompare(b)),
   }), [records])
 
   const filtered = useMemo(() => {
@@ -58,6 +59,7 @@ export default function StorefrontPage() {
       && (filters.year === ALL || String(record.year_pressed) === filters.year)
       && (filters.condition === ALL || record.media_condition === filters.condition)
       && (filters.owner === ALL || record.collection_owner === filters.owner)
+      && (filters.group === ALL || record.record_group === filters.group)
     ))
   }, [records, filters])
 

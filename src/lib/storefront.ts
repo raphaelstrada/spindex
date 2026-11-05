@@ -206,15 +206,17 @@ export type CatalogFilterValues = {
   year: string
   condition: string
   owner: string
+  group: string
 }
 
 export const ALL = '__all__'
 
-export const EMPTY_FILTERS: CatalogFilterValues = { artist: '', genre: ALL, year: ALL, condition: ALL, owner: ALL }
+export const EMPTY_FILTERS: CatalogFilterValues = { artist: '', genre: ALL, year: ALL, condition: ALL, owner: ALL, group: ALL }
 
 export type CatalogFilterOptions = {
   genres: string[]
   years: string[]
   conditions: string[]
   owners: string[]
+  groups: string[]
 }
