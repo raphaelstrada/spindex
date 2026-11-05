@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import type { CollectionOwner } from '@/lib/collection'
 import type { Language } from '@/lib/i18n'
 
 // Mirrors the public_catalog view exactly. The storefront must never read any other column or table.
@@ -39,10 +40,11 @@ function catalogQuery() {
   return supabase.from('public_catalog').select(CATALOG_COLUMNS)
 }
 
-export async function fetchCatalog(): Promise<CatalogRecord[]> {
+export async function fetchCatalog(owner?: CollectionOwner): Promise<CatalogRecord[]> {
   const records: CatalogRecord[] = []
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await catalogQuery()
+    const query = owner ? catalogQuery().eq('collection_owner', owner) : catalogQuery()
+    const { data, error } = await query
       .order('artist', { ascending: true })
       .order('title', { ascending: true })
       .order('id', { ascending: true })

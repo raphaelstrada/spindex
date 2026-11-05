@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 type CatalogFiltersProps = {
   values: CatalogFilterValues
   options: CatalogFilterOptions
+  hideOwner?: boolean
   onChange: (values: CatalogFilterValues) => void
 }
 
@@ -31,13 +32,13 @@ function FilterSelect({ id, label, value, options, onChange }: { id: string, lab
   )
 }
 
-export function CatalogFilters({ values, options, onChange }: CatalogFiltersProps) {
+export function CatalogFilters({ values, options, hideOwner = false, onChange }: CatalogFiltersProps) {
   const { t } = useStorefrontLanguage()
   const set = (key: keyof CatalogFilterValues) => (value: string) => onChange({ ...values, [key]: value })
   const isFiltered = values.artist.trim() !== '' || values.genre !== ALL || values.year !== ALL || values.condition !== ALL || values.owner !== ALL
 
   return (
-    <div className="grid grid-cols-2 items-end gap-3 md:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto]">
+    <div className={cn('grid grid-cols-2 items-end gap-3', hideOwner ? 'md:grid-cols-[2fr_1fr_1fr_1fr_auto]' : 'md:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto]')}>
       <div className="col-span-2 space-y-1.5 md:col-span-1">
         <Label htmlFor="filter-artist" className={cn(storeMonoLabel, 'text-store-muted')}>{t.searchArtist}</Label>
         <div className="relative">
@@ -55,7 +56,7 @@ export function CatalogFilters({ values, options, onChange }: CatalogFiltersProp
       <FilterSelect id="filter-genre" label={t.genre} value={values.genre} options={options.genres} onChange={set('genre')} />
       <FilterSelect id="filter-year" label={t.year} value={values.year} options={options.years} onChange={set('year')} />
       <FilterSelect id="filter-condition" label={t.condition} value={values.condition} options={options.conditions} onChange={set('condition')} />
-      <FilterSelect id="filter-owner" label={t.owner} value={values.owner} options={options.owners} onChange={set('owner')} />
+      {!hideOwner && <FilterSelect id="filter-owner" label={t.owner} value={values.owner} options={options.owners} onChange={set('owner')} />}
       <button
         type="button"
         onClick={() => onChange(EMPTY_FILTERS)}

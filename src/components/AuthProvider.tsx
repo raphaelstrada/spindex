@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { AuthContext, useAuth } from '@/lib/auth'
-import type { CollectionOwner } from '@/lib/collection'
+import { isCollectionOwner, type CollectionOwner } from '@/lib/collection'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         if (error) console.error('Admin lookup failed:', error)
         const value = data?.collection_owner
-        setOwner(value === 'Raphael' || value === 'Tim' ? value : null)
+        setOwner(isCollectionOwner(value) ? value : null)
         setOwnerUserId(userId)
       })
     return () => {

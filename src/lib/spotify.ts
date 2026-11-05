@@ -202,7 +202,12 @@ export function parseSpotifyAlbumId(value: string | null | undefined): string | 
 
 type SpotifyAlbum = { id: string; name: string; album_type: string; release_date?: string; artists: { name: string }[] }
 
-/** Exact artist + title match only (never a guess); prefers the record's year, then real albums. */
+/** Title without edition suffixes: "Blizzard Of Ozz (40th Anniversary Expanded Edition)", "Paranoid - 2009 Remaster". */
+function baseAlbumTitle(value: string) {
+  return normalizeMatchText(value.replace(/\s*(\([^)]*\)|\[[^\]]*\]|\s-\s.*)\s*$/g, '')) || normalizeMatchText(value)
+}
+
+/** Exact artist + title match only (never a guess, edition suffixes aside); prefers the exact title, the record's year, then real albums. */
 export async function matchSpotifyAlbum(owner: string, record: VinylRecord): Promise<string | null> {
   if (!record.artist || !record.title) return null
   const query = `album:"${record.title.replace(/"/g, '')}" artist:"${record.artist.replace(/"/g, '')}"`
@@ -212,12 +217,14 @@ export async function matchSpotifyAlbum(owner: string, record: VinylRecord): Pro
   )
   const artist = normalizeMatchText(record.artist)
   const title = normalizeMatchText(record.title)
+  const baseTitle = baseAlbumTitle(record.title)
   const matches = (result.albums?.items ?? []).filter((album) =>
-    normalizeMatchText(album.name) === title
+    (normalizeMatchText(album.name) === title || baseAlbumTitle(album.name) === baseTitle)
     && album.artists.some((albumArtist) => normalizeMatchText(albumArtist.name) === artist),
   )
   const score = (album: SpotifyAlbum) =>
-    Number(record.year_pressed != null && album.release_date?.startsWith(String(record.year_pressed))) * 2
+    Number(normalizeMatchText(album.name) === title) * 4
+    + Number(record.year_pressed != null && album.release_date?.startsWith(String(record.year_pressed))) * 2
     + Number(album.album_type === 'album')
   matches.sort((left, right) => score(right) - score(left))
   return matches[0]?.id ?? null

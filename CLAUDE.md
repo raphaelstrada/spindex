@@ -2,11 +2,11 @@
 Vinyl catalog app. React + Vite + TypeScript + Tailwind + shadcn/ui. Supabase (DB, Auth, Edge Functions). Hosted on GitHub Pages under base path `/spindex/` (static hosting: no server code besides Supabase).
 
 ## Two surfaces
-- Public storefront: `/spindex/` (Polaroid-style product pages, bag, checkout). No login.
+- Public storefront: `/spindex/` (Polaroid-style product pages, bag, checkout). No login. `/spindex/{owner}` shows one owner's records.
 - Admin: `/spindex/admin` (the existing app: DataTable, Discogs sync, photo/barcode import, Facebook Marketplace). Login required.
 
 ## Owners
-Two users only: Raphael and Tim. Each admin manages ONLY rows where `vinyl_records.collection_owner` equals their own owner. Owner comes from the `admins` table, never from the URL.
+Three users only: Raphael, Tim and Aaron. Each admin manages ONLY rows where `vinyl_records.collection_owner` equals their own owner. Owner comes from the `admins` table, never from the URL.
 
 ## Rules
 - Security lives in Supabase RLS and Edge Function JWT checks, never only in the UI.

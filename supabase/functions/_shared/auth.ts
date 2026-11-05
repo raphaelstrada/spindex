@@ -1,6 +1,6 @@
 export type AdminContext = {
   userId: string
-  owner: 'Raphael' | 'Tim'
+  owner: 'Raphael' | 'Tim' | 'Aaron'
   token: string
 }
 
@@ -46,7 +46,7 @@ export async function requireAdmin(
 
   const rows = await adminResponse.json() as { collection_owner?: string }[]
   const owner = rows[0]?.collection_owner
-  if (owner !== 'Raphael' && owner !== 'Tim') return errorResponse('Not an admin.', 403, corsHeaders)
+  if (owner !== 'Raphael' && owner !== 'Tim' && owner !== 'Aaron') return errorResponse('Not an admin.', 403, corsHeaders)
 
   return { userId: user.id, owner, token }
 }
