@@ -114,12 +114,14 @@ export async function cancelCheckout(sessionId: string) {
 }
 
 export async function fetchRelated(record: CatalogRecord): Promise<{ sameArtist: CatalogRecord[], sameGenre: CatalogRecord[] }> {
+  if (!record.collection_owner) return { sameArtist: [], sameGenre: [] }
+  const sameOwner = () => catalogQuery().eq('collection_owner', record.collection_owner as string)
   const [artistResult, genreResult] = await Promise.all([
     record.artist
-      ? catalogQuery().eq('artist', record.artist).neq('id', record.id).limit(RELATED_LIMIT)
+      ? sameOwner().eq('artist', record.artist).neq('id', record.id).limit(RELATED_LIMIT)
       : Promise.resolve({ data: [], error: null }),
     record.genre
-      ? catalogQuery().eq('genre', record.genre).neq('id', record.id).limit(RELATED_LIMIT * 2)
+      ? sameOwner().eq('genre', record.genre).neq('id', record.id).limit(RELATED_LIMIT * 2)
       : Promise.resolve({ data: [], error: null }),
   ])
   if (artistResult.error) throw artistResult.error

@@ -4,6 +4,9 @@ export const COLLECTION_OWNERS = ['Raphael', 'Tim', 'Aaron'] as const
 
 export type CollectionOwner = (typeof COLLECTION_OWNERS)[number]
 
+// The front page shows one collection; the others stay on their own /{owner} page.
+export const FRONT_PAGE_OWNER: CollectionOwner = 'Raphael'
+
 export function isCollectionOwner(value: unknown): value is CollectionOwner {
   return COLLECTION_OWNERS.includes(value as CollectionOwner)
 }

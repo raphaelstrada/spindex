@@ -54,3 +54,25 @@
   body { @apply bg-background font-sans text-foreground antialiased; }
   ::selection { background: #fed000; color: #1a1a1a; }
 }
+
+.content-protected body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.content-protected input,
+.content-protected textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.content-protected img {
+  -webkit-user-drag: none;
+}
+
+@media print {
+  .content-protected body {
+    display: none;
+  }
+}

@@ -4,7 +4,7 @@ import { CatalogFilters } from '@/components/storefront/CatalogFilters'
 import { CatalogGrid } from '@/components/storefront/CatalogGrid'
 import { HeroCarousel } from '@/components/storefront/HeroCarousel'
 import { fetchCatalog, interpolate, shuffle, type CatalogRecord } from '@/lib/catalog'
-import { ownerFromSlug, type CollectionOwner } from '@/lib/collection'
+import { FRONT_PAGE_OWNER, ownerFromSlug, type CollectionOwner } from '@/lib/collection'
 import { ALL, EMPTY_FILTERS, useStorefrontLanguage, type CatalogFilterOptions, type CatalogFilterValues } from '@/lib/storefront'
 
 function distinct(values: (string | number | null | undefined)[]) {
@@ -24,7 +24,7 @@ export default function StorefrontPage({ owner }: { owner?: CollectionOwner }) {
 
   useEffect(() => {
     let cancelled = false
-    fetchCatalog(owner)
+    fetchCatalog(owner ?? FRONT_PAGE_OWNER)
       .then((data) => {
         if (!cancelled) setRecords(data)
       })
@@ -75,7 +75,7 @@ export default function StorefrontPage({ owner }: { owner?: CollectionOwner }) {
         </div>
         {!loading && !error && records.length > 0 && (
           <div className="mb-10">
-            <CatalogFilters values={filters} options={options} hideOwner={Boolean(owner)} onChange={setFilters} />
+            <CatalogFilters values={filters} options={options} hideOwner onChange={setFilters} />
           </div>
         )}
         <CatalogGrid

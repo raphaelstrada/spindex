@@ -6,6 +6,7 @@ import { BagDrawer } from '@/components/storefront/BagDrawer'
 import { StorefrontFooter } from '@/components/storefront/StorefrontFooter'
 import { StorefrontHeader } from '@/components/storefront/StorefrontHeader'
 import { StorefrontLanguageProvider } from '@/components/storefront/StorefrontLanguage'
+import { useContentProtection } from '@/lib/contentProtection'
 
 export default function StorefrontLayout() {
   // The storefront is always light, whatever theme the admin picked.
@@ -17,6 +18,8 @@ export default function StorefrontLayout() {
       if (wasDark) root.classList.add('dark')
     }
   }, [])
+
+  useContentProtection()
 
   return (
     <StorefrontLanguageProvider>
