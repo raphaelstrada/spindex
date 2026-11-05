@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Navigate, useParams } from 'react-router-dom'
 import { CatalogFilters } from '@/components/storefront/CatalogFilters'
 import { CatalogGrid } from '@/components/storefront/CatalogGrid'
 import { HeroCarousel } from '@/components/storefront/HeroCarousel'
 import { fetchCatalog, interpolate, shuffle, type CatalogRecord } from '@/lib/catalog'
-import { FRONT_PAGE_OWNER, ownerFromSlug, type CollectionOwner } from '@/lib/collection'
-import { ALL, EMPTY_FILTERS, useStorefrontLanguage, type CatalogFilterOptions, type CatalogFilterValues } from '@/lib/storefront'
+import { FRONT_PAGE_OWNER } from '@/lib/collection'
+import { ALL, EMPTY_FILTERS, useStore, useStorefrontLanguage, type CatalogFilterOptions, type CatalogFilterValues } from '@/lib/storefront'
 
 function distinct(values: (string | number | null | undefined)[]) {
   return [...new Set(values.filter((value) => value !== null && value !== undefined && value !== '').map(String))]
 }
 
-export default function StorefrontPage({ owner }: { owner?: CollectionOwner }) {
+export default function StorefrontPage() {
   const { t, app } = useStorefrontLanguage()
+  const { owner } = useStore()
   const [records, setRecords] = useState<CatalogRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -24,7 +24,7 @@ export default function StorefrontPage({ owner }: { owner?: CollectionOwner }) {
 
   useEffect(() => {
     let cancelled = false
-    fetchCatalog(owner ?? FRONT_PAGE_OWNER)
+    fetchCatalog(owner)
       .then((data) => {
         if (!cancelled) setRecords(data)
       })
@@ -66,7 +66,7 @@ export default function StorefrontPage({ owner }: { owner?: CollectionOwner }) {
       {heroes.length > 0 && <HeroCarousel records={heroes} />}
       <section className="mx-auto max-w-screen-2xl px-4 pt-12 md:px-10 md:pt-16" aria-labelledby="catalog-title">
         <div className="mb-8 flex items-baseline justify-between gap-4">
-          <h1 id="catalog-title" className="text-3xl font-bold tracking-tight md:text-4xl">{owner ? interpolate(t.ownerCatalogTitle, { owner }) : t.catalogTitle}</h1>
+          <h1 id="catalog-title" className="text-3xl font-bold tracking-tight md:text-4xl">{owner === FRONT_PAGE_OWNER ? t.catalogTitle : interpolate(t.ownerCatalogTitle, { owner })}</h1>
           {!loading && !error && (
             <p className="font-mono-ui text-xs uppercase tracking-[0.12em] text-store-muted" aria-live="polite">
               {interpolate(t.resultsCount, { count: filtered.length })}
@@ -89,10 +89,4 @@ export default function StorefrontPage({ owner }: { owner?: CollectionOwner }) {
       </section>
     </>
   )
-}
-
-export function OwnerStorefrontPage() {
-  const owner = ownerFromSlug(useParams().owner)
-  if (!owner) return <Navigate to="/" replace />
-  return <StorefrontPage key={owner} owner={owner} />
 }

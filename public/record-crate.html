@@ -172,4 +172,27 @@ $("#copy").addEventListener("click",()=>{
 render();
 </script>
 
+<style>
+/* A deterrent only, same rules as the storefront's contentProtection.ts. The search and message fields keep working. */
+body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea{-webkit-user-select:text;user-select:text}
+img{-webkit-user-drag:none}
+@media print{body{display:none}}
+</style>
+<script>
+(()=>{
+const DEVTOOLS_KEYS=["KeyI","KeyJ","KeyC","KeyK","KeyE","KeyM","KeyU"],PAGE_KEYS=["KeyU","KeyS","KeyP"],SELECTION_KEYS=["KeyA","KeyC","KeyX","KeyV"];
+const isEditable=t=>t instanceof HTMLElement&&t.closest("input,textarea")!==null;
+const blocked=e=>{
+  if(e.key==="F12")return true;
+  if(!e.ctrlKey&&!e.metaKey)return false;
+  if((e.shiftKey||e.altKey)&&DEVTOOLS_KEYS.includes(e.code))return true;
+  if(PAGE_KEYS.includes(e.code))return true;
+  return SELECTION_KEYS.includes(e.code)&&!isEditable(e.target);
+};
+["contextmenu","copy","cut","paste","drop","dragstart","selectstart"].forEach(n=>document.addEventListener(n,e=>{if(!isEditable(e.target))e.preventDefault()},true));
+document.addEventListener("keydown",e=>{if(blocked(e))e.preventDefault()},true);
+})();
+</script>
+
 </body></html>

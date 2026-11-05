@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Logo } from '@/components/Logo'
 import { interpolate } from '@/lib/catalog'
-import { useStorefrontLanguage } from '@/lib/storefront'
+import { useStorefrontLanguage, useStore } from '@/lib/storefront'
 
 const linkClass = 'rounded-sm text-sm text-white/75 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white'
 
@@ -19,6 +19,7 @@ function PaymentIcon({ label, children }: { label: string, children: ReactNode }
 
 export function StorefrontFooter() {
   const { t } = useStorefrontLanguage()
+  const { path } = useStore()
 
   return (
     <footer className="mt-24 bg-store-ink text-white">
@@ -29,8 +30,8 @@ export function StorefrontFooter() {
         <nav aria-labelledby="footer-shop">
           <h2 id="footer-shop" className="mb-4 font-mono-ui text-xs uppercase tracking-widest">{t.footerShop}</h2>
           <ul className="space-y-2">
-            <li><Link to="/" className={linkClass}>{t.footerAllRecords}</Link></li>
-            <li><Link to="/bag" className={linkClass}>{t.footerBag}</Link></li>
+            <li><Link to={path('/')} className={linkClass}>{t.footerAllRecords}</Link></li>
+            <li><Link to={path('/bag')} className={linkClass}>{t.footerBag}</Link></li>
           </ul>
         </nav>
         <div>

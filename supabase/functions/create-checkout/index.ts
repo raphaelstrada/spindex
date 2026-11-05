@@ -7,6 +7,8 @@ import { CHECKOUT_SESSION_PATTERN, serviceClient, stripeClient } from '../_share
 // Prices are then treated as tax-inclusive, so the amounts shown on the storefront stay final.
 const COLLECT_TAX = false
 
+const FRONT_PAGE_OWNER = 'Raphael'
+
 const MAX_ITEMS = 50
 // Stripe requires expires_at to be at least 30 minutes away; the extra minute absorbs clock skew.
 const SESSION_MINUTES = 31
@@ -112,6 +114,16 @@ async function createCheckout(recordIds: string[], language: string) {
     // One key per reservation: a retried request reuses the same session instead of creating a second one.
     const idempotencyKey = await reservationKey(recordIds, reservedUntil)
 
+    // Stripe sends the buyer back to the store they bought from. The owner is read from the DB, never the client.
+    const { data: ownerData, error: ownerError } = await supabase
+      .from('vinyl_records')
+      .select('collection_owner')
+      .eq('id', recordIds[0])
+      .single()
+    if (ownerError) throw ownerError
+    const owner = ownerData.collection_owner as string | null
+    const storeUrl = owner && owner !== FRONT_PAGE_OWNER ? `${siteUrl}/${owner.toLowerCase()}` : siteUrl
+
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       // Card only (Apple Pay, Google Pay and Link included): it confirms instantly. Delayed methods such as
@@ -140,8 +152,8 @@ async function createCheckout(recordIds: string[], language: string) {
       ...(COLLECT_TAX ? { automatic_tax: { enabled: true } } : {}),
       expires_at: expiresAt,
       metadata: { record_ids: reserve.records.map((record) => record.id).join(',') },
-      success_url: `${siteUrl}/order/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${siteUrl}/bag?cancelled={CHECKOUT_SESSION_ID}`,
+      success_url: `${storeUrl}/order/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${storeUrl}/bag?cancelled={CHECKOUT_SESSION_ID}`,
     }, { idempotencyKey })
 
     const { error: linkError } = await supabase

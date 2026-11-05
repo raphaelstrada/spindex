@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { ProductGallery } from '@/components/storefront/ProductGallery'
 import { RecordRail } from '@/components/storefront/RecordRail'
 import { fetchCatalogRecord, fetchRelated, formatCad, type CatalogRecord } from '@/lib/catalog'
-import { storeFocus, storeMonoLabel, storePrimaryButton, storeSecondaryButton, useBag, useStorefrontLanguage } from '@/lib/storefront'
+import { storeFocus, storeMonoLabel, storePrimaryButton, storeSecondaryButton, useBag, useStore, useStorefrontLanguage } from '@/lib/storefront'
 import { cn } from '@/lib/utils'
 
 type LoadState =
@@ -40,6 +40,7 @@ function InfoAccordionItem({ value, title, children }: { value: string, title: s
 export default function ProductPage() {
   const { id = '' } = useParams()
   const { language, t, app } = useStorefrontLanguage()
+  const { owner, path } = useStore()
   const bag = useBag()
   // Both are tagged with the id they belong to, so a new id reads as loading without resetting state in the effect.
   const [loaded, setLoaded] = useState<LoadState | null>(null)
@@ -50,7 +51,7 @@ export default function ProductPage() {
   useEffect(() => {
     window.scrollTo(0, 0)
     let cancelled = false
-    fetchCatalogRecord(id)
+    fetchCatalogRecord(id, owner)
       .then((record) => {
         if (cancelled) return
         setLoaded({ id, status: 'ready', record })
@@ -69,7 +70,7 @@ export default function ProductPage() {
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, owner])
 
   const record = state.status === 'ready' ? state.record : null
   const artist = record?.artist || t.unknownArtist
@@ -99,7 +100,7 @@ export default function ProductPage() {
       <div className="mx-auto flex max-w-xl flex-col items-center gap-6 px-4 py-24 text-center" role={state.status === 'error' ? 'alert' : 'status'}>
         <h1 className="text-3xl font-bold tracking-tight">{state.status === 'error' ? t.loadError : t.notFoundTitle}</h1>
         {state.status !== 'error' && <p className="text-store-muted">{t.notFoundBody}</p>}
-        <Link to="/" className={storeSecondaryButton}>{t.backToShop}</Link>
+        <Link to={path('/')} className={storeSecondaryButton}>{t.backToShop}</Link>
       </div>
     )
   }
@@ -133,7 +134,7 @@ export default function ProductPage() {
         <div className="px-4 py-8 md:px-12 lg:py-14 xl:px-16">
           <nav aria-label={t.breadcrumb} className={cn(storeMonoLabel, 'mb-8')}>
             <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <li><Link to="/" className={cn('hover:underline', storeFocus)}>{t.shop}</Link></li>
+              <li><Link to={path('/')} className={cn('hover:underline', storeFocus)}>{t.shop}</Link></li>
               {record.genre && (
                 <>
                   <li aria-hidden="true">/</li>
@@ -187,7 +188,7 @@ export default function ProductPage() {
               {inBag ? t.inYourBag : t.addToBag}
             </button>
             <p className="text-sm text-store-muted" aria-live="polite">
-              {inBag ? <Link to="/bag" className={cn('text-store-ink underline underline-offset-4', storeFocus)}>{t.viewBag}</Link> : t.oneOfAKind}
+              {inBag ? <Link to={path('/bag')} className={cn('text-store-ink underline underline-offset-4', storeFocus)}>{t.viewBag}</Link> : t.oneOfAKind}
             </p>
           </div>
 

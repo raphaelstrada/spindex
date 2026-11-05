@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Disc3 } from 'lucide-react'
 import { formatCad, interpolate, type CatalogRecord } from '@/lib/catalog'
-import { storeFocus, storeMonoLabel, useStorefrontLanguage } from '@/lib/storefront'
+import { storeFocus, storeMonoLabel, useStorefrontLanguage, useStore } from '@/lib/storefront'
 import { cn } from '@/lib/utils'
 
 export function RecordCover({ src, alt, className }: { src: string | null, alt: string, className?: string }) {
@@ -19,11 +19,12 @@ export function RecordCover({ src, alt, className }: { src: string | null, alt: 
 
 export function RecordCard({ record }: { record: CatalogRecord }) {
   const { language, t } = useStorefrontLanguage()
+  const { path } = useStore()
   const artist = record.artist || t.unknownArtist
   const title = record.title || t.untitled
 
   return (
-    <Link to={`/record/${record.id}`} className={cn('group block', storeFocus)}>
+    <Link to={path(`/record/${record.id}`)} className={cn('group block', storeFocus)}>
       <RecordCover
         src={record.image_url}
         alt={interpolate(t.coverAlt, { title: `${artist}: ${title}` })}

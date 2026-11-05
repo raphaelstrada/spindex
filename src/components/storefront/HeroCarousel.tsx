@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from '@/components/ui/carousel'
 import { RecordCover } from '@/components/storefront/RecordCard'
 import { formatCad, interpolate, type CatalogRecord } from '@/lib/catalog'
-import { storeFocus, storeMonoLabel, storePrimaryButton, usePrefersReducedMotion, useStorefrontLanguage } from '@/lib/storefront'
+import { storeFocus, storeMonoLabel, storePrimaryButton, usePrefersReducedMotion, useStorefrontLanguage, useStore } from '@/lib/storefront'
 import { cn } from '@/lib/utils'
 
 const AUTOPLAY_MS = 6000
@@ -16,6 +16,7 @@ const arrowClass = cn(
 
 export function HeroCarousel({ records }: { records: CatalogRecord[] }) {
   const { language, t } = useStorefrontLanguage()
+  const { path } = useStore()
   const reducedMotion = usePrefersReducedMotion()
   const [api, setApi] = useState<CarouselApi>()
   const [selected, setSelected] = useState(0)
@@ -81,7 +82,7 @@ export function HeroCarousel({ records }: { records: CatalogRecord[] }) {
                   <h2 className="text-3xl font-bold leading-tight tracking-tight md:text-5xl">{title}</h2>
                   {record.hero_tagline && <p className="text-lg md:text-xl">{record.hero_tagline}</p>}
                   <p className="text-lg">{formatCad(record.sale_price_cad, language)}</p>
-                  <Link to={`/record/${record.id}`} className={cn(storePrimaryButton, 'w-full md:w-auto')}>
+                  <Link to={path(`/record/${record.id}`)} className={cn(storePrimaryButton, 'w-full md:w-auto')}>
                     {t.shopNow}
                   </Link>
                 </div>

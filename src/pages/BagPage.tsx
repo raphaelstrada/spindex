@@ -4,12 +4,13 @@ import { X } from 'lucide-react'
 import { BagTotals } from '@/components/storefront/BagDrawer'
 import { RecordCover } from '@/components/storefront/RecordCard'
 import { formatCad, interpolate } from '@/lib/catalog'
-import { storeFocus, storeSecondaryButton, useBag, useBagSummary, useStorefrontLanguage } from '@/lib/storefront'
+import { storeFocus, storeSecondaryButton, useBag, useBagSummary, useStorefrontLanguage, useStore } from '@/lib/storefront'
 import { cn } from '@/lib/utils'
 
 export default function BagPage() {
   const { language, t, app } = useStorefrontLanguage()
   const bag = useBag()
+  const { path } = useStore()
   const summary = useBagSummary()
 
   useEffect(() => {
@@ -29,7 +30,7 @@ export default function BagPage() {
       ) : summary.records.length === 0 ? (
         <div className="flex flex-col items-start gap-6">
           <p className="text-store-muted">{t.bagEmpty}</p>
-          <Link to="/" className={storeSecondaryButton}>{t.backToShop}</Link>
+          <Link to={path('/')} className={storeSecondaryButton}>{t.backToShop}</Link>
         </div>
       ) : (
         <>
@@ -38,11 +39,11 @@ export default function BagPage() {
               const name = `${record.artist || t.unknownArtist}: ${record.title || t.untitled}`
               return (
                 <li key={record.id} className="flex items-center gap-4 py-5">
-                  <Link to={`/record/${record.id}`} className={cn('w-20 shrink-0 md:w-24', storeFocus)} tabIndex={-1} aria-hidden="true">
+                  <Link to={path(`/record/${record.id}`)} className={cn('w-20 shrink-0 md:w-24', storeFocus)} tabIndex={-1} aria-hidden="true">
                     <RecordCover src={record.image_url} alt="" />
                   </Link>
                   <div className="min-w-0 flex-1">
-                    <Link to={`/record/${record.id}`} className={cn('font-medium hover:underline', storeFocus)}>{name}</Link>
+                    <Link to={path(`/record/${record.id}`)} className={cn('font-medium hover:underline', storeFocus)}>{name}</Link>
                     <p className="mt-1 text-sm">{formatCad(record.sale_price_cad, language)}</p>
                   </div>
                   <button

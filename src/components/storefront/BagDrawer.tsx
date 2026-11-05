@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { X } from 'lucide-react'
 import { RecordCover } from '@/components/storefront/RecordCard'
 import { formatCad, interpolate, recordDisplayName, type BagQuote } from '@/lib/catalog'
-import { storeFocus, storeMonoLabel, storePrimaryButton, storeSecondaryButton, useBag, useBagSummary, useStorefrontLanguage } from '@/lib/storefront'
+import { storeFocus, storeMonoLabel, storePrimaryButton, storeSecondaryButton, useBag, useBagSummary, useStorefrontLanguage, useStore } from '@/lib/storefront'
 import { cn } from '@/lib/utils'
 
 // Subtotal, shipping estimate and checkout button. Every amount comes from bag_quote.
@@ -45,6 +45,7 @@ export function BagTotals({ quote, onCheckout, pending, failed }: {
 
 function BagDrawerBody() {
   const { language, t } = useStorefrontLanguage()
+  const { path } = useStore()
   const bag = useBag()
   const summary = useBagSummary()
 
@@ -66,7 +67,7 @@ function BagDrawerBody() {
               return (
                 <li key={record.id} className="flex items-center gap-3 py-4">
                   <Link
-                    to={`/record/${record.id}`}
+                    to={path(`/record/${record.id}`)}
                     onClick={() => bag.setDrawerOpen(false)}
                     className={cn('w-16 shrink-0', storeFocus)}
                     tabIndex={-1}
@@ -76,7 +77,7 @@ function BagDrawerBody() {
                   </Link>
                   <div className="min-w-0 flex-1">
                     <Link
-                      to={`/record/${record.id}`}
+                      to={path(`/record/${record.id}`)}
                       onClick={() => bag.setDrawerOpen(false)}
                       className={cn('line-clamp-2 text-sm font-medium hover:underline', storeFocus)}
                     >
@@ -98,7 +99,7 @@ function BagDrawerBody() {
           </ul>
           <div className="mt-6 space-y-3">
             <BagTotals quote={summary.quote} onCheckout={summary.checkout} pending={summary.checkoutPending} failed={summary.checkoutError} />
-            <Link to="/bag" onClick={() => bag.setDrawerOpen(false)} className={cn(storeSecondaryButton, 'w-full')}>{t.viewBag}</Link>
+            <Link to={path('/bag')} onClick={() => bag.setDrawerOpen(false)} className={cn(storeSecondaryButton, 'w-full')}>{t.viewBag}</Link>
           </div>
         </>
       )}

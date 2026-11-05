@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import type { CollectionOwner } from '@/lib/collection'
 import { translations, type Language } from '@/lib/i18n'
 import { cancelCheckout, fetchBagQuote, fetchCatalogByIds, startCheckout, type BagQuote, type CatalogRecord } from '@/lib/catalog'
 
@@ -15,6 +16,20 @@ export function useStorefrontLanguage() {
   if (!context) throw new Error('useStorefrontLanguage must be used inside StorefrontLanguageProvider')
   const { language, setLanguage } = context
   return { language, setLanguage, t: translations[language].storefront, app: translations[language].app }
+}
+
+// Each store shows one owner only. `path` keeps every link inside the current store.
+export type StoreState = {
+  owner: CollectionOwner
+  path: (to: string) => string
+}
+
+export const StoreContext = createContext<StoreState | null>(null)
+
+export function useStore() {
+  const context = useContext(StoreContext)
+  if (!context) throw new Error('useStore must be used inside StorefrontLayout')
+  return context
 }
 
 // The bag holds record ids only. Prices are always read from public_catalog.
@@ -69,6 +84,7 @@ type BagData = { key: string, records: CatalogRecord[], quote: BagQuote | null }
 // drops ids that are no longer listed, and starts the checkout. Every amount comes from the server.
 export function useBagSummary() {
   const bag = useBag()
+  const { owner, path } = useStore()
   const { language } = useStorefrontLanguage()
   const [searchParams, setSearchParams] = useSearchParams()
   const [pendingSessionId, setPendingSessionId] = useState(() => searchParams.get('cancelled') ?? readPendingCheckout())
@@ -101,10 +117,10 @@ export function useBagSummary() {
     if (pendingSessionId || !idsKey) return
     let cancelled = false
     const ids = idsKey.split(',')
-    Promise.all([fetchCatalogByIds(ids), fetchBagQuote(ids)])
+    Promise.all([fetchCatalogByIds(ids, owner), fetchBagQuote(ids)])
       .then(([records, quote]) => {
         if (cancelled) return
-        // Ids missing from public_catalog were sold, reserved or unlisted.
+        // Ids missing here were sold, reserved, unlisted or belong to another store.
         const available = new Set(records.map((record) => record.id))
         const missing = ids.filter((id) => !available.has(id))
         if (missing.length > 0) {
@@ -134,7 +150,7 @@ export function useBagSummary() {
       if ('url' in result) {
         writePendingCheckout(result.sessionId)
         // The back button from Stripe then lands on the bag, which releases the reservation first.
-        window.history.replaceState(null, '', `${import.meta.env.BASE_URL}bag`)
+        window.history.replaceState(null, '', `${import.meta.env.BASE_URL}${path('/bag').slice(1)}`)
         window.location.assign(result.url)
         return
       }

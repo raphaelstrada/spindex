@@ -4,11 +4,12 @@ import { Logo } from '@/components/Logo'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Language } from '@/lib/i18n'
 import { interpolate } from '@/lib/catalog'
-import { useBag, useStorefrontLanguage } from '@/lib/storefront'
+import { useBag, useStorefrontLanguage, useStore } from '@/lib/storefront'
 
 export function StorefrontHeader() {
   const { language, setLanguage, t, app } = useStorefrontLanguage()
   const { count, setDrawerOpen } = useBag()
+  const { path } = useStore()
 
   return (
     <header className="sticky top-0 z-40 border-b border-store-line bg-white">
@@ -27,7 +28,7 @@ export function StorefrontHeader() {
             </SelectContent>
           </Select>
         </div>
-        <Link to="/" aria-label={t.home} className="justify-self-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-store-ink focus-visible:ring-offset-2">
+        <Link to={path('/')} aria-label={t.home} className="justify-self-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-store-ink focus-visible:ring-offset-2">
           <Logo className="text-store-ink" />
         </Link>
         <button

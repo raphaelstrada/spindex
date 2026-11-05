@@ -40,11 +40,11 @@ function catalogQuery() {
   return supabase.from('public_catalog').select(CATALOG_COLUMNS)
 }
 
-export async function fetchCatalog(owner?: CollectionOwner): Promise<CatalogRecord[]> {
+export async function fetchCatalog(owner: CollectionOwner): Promise<CatalogRecord[]> {
   const records: CatalogRecord[] = []
   for (let from = 0; ; from += PAGE_SIZE) {
-    const query = owner ? catalogQuery().eq('collection_owner', owner) : catalogQuery()
-    const { data, error } = await query
+    const { data, error } = await catalogQuery()
+      .eq('collection_owner', owner)
       .order('artist', { ascending: true })
       .order('title', { ascending: true })
       .order('id', { ascending: true })
@@ -56,17 +56,17 @@ export async function fetchCatalog(owner?: CollectionOwner): Promise<CatalogReco
   }
 }
 
-export async function fetchCatalogRecord(id: string): Promise<CatalogRecord | null> {
+export async function fetchCatalogRecord(id: string, owner: CollectionOwner): Promise<CatalogRecord | null> {
   if (!UUID_PATTERN.test(id)) return null
-  const { data, error } = await catalogQuery().eq('id', id).maybeSingle()
+  const { data, error } = await catalogQuery().eq('id', id).eq('collection_owner', owner).maybeSingle()
   if (error) throw error
   return data as CatalogRecord | null
 }
 
-export async function fetchCatalogByIds(ids: string[]): Promise<CatalogRecord[]> {
+export async function fetchCatalogByIds(ids: string[], owner: CollectionOwner): Promise<CatalogRecord[]> {
   const validIds = ids.filter((id) => UUID_PATTERN.test(id))
   if (validIds.length === 0) return []
-  const { data, error } = await catalogQuery().in('id', validIds)
+  const { data, error } = await catalogQuery().in('id', validIds).eq('collection_owner', owner)
   if (error) throw error
   return (data ?? []) as CatalogRecord[]
 }
