@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getDiscogsReleaseId, searchDiscogsReleases, type DiscogsRelease } from '@/lib/discogs'
 import type { CollectionOwner } from '@/lib/collection'
-import type { VinylRecord } from '@/lib/record'
+import { isAutoMatched, type VinylRecord } from '@/lib/record'
 import { detectSetupIssue } from '@/lib/setupIssues'
 
 /** Identify the pressing: never updated from Discogs, only reported when they differ. */
@@ -82,7 +82,7 @@ function isEmpty(value: unknown) {
 }
 
 /** Accent/case-insensitive; drops Discogs disambiguation like "(2)" and "*". */
-function normalizeArtist(value: string) {
+export function normalizeArtist(value: string) {
   return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
     .replace(/\(\d+\)/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 }
@@ -118,6 +118,11 @@ export function diffRecord(record: VinylRecord, release: DiscogsRelease, kept: R
 
 export function recordReleaseId(record: Pick<VinylRecord, 'discogs_link' | 'image_url'>) {
   return getDiscogsReleaseId(record.discogs_link) ?? getDiscogsReleaseId(record.image_url)
+}
+
+/** Both tools share the Discogs rate limit, so only one runs at a time. */
+export function isVerificationRunning(owner: CollectionOwner) {
+  return loadState(owner).status === 'running'
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -212,9 +217,10 @@ export function useDiscogsVerification(owner: CollectionOwner) {
   }, [state.status, owner, update])
 
   const start = useCallback(async () => {
-    const { data, error } = await supabase.from('vinyl_records').select('id, discogs_link, image_url').eq('collection_owner', owner)
+    const { data, error } = await supabase.from('vinyl_records').select('id, discogs_link, image_url, discogs_auto_match, discogs_auto_cover').eq('collection_owner', owner)
     if (error) throw new Error(error.message)
-    const queue = ((data ?? []) as VinylRecord[]).filter((record) => recordReleaseId(record) !== null).map((record) => record.id)
+    // An automatic match is expected to differ from the pressing in hand: only checked once the admin confirms it.
+    const queue = ((data ?? []) as VinylRecord[]).filter((record) => recordReleaseId(record) !== null && !isAutoMatched(record)).map((record) => record.id)
     update((current) => ({ ...EMPTY_STATE, kept: current.kept, status: 'running', queue }))
   }, [owner, update])
 

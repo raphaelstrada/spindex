@@ -59,7 +59,7 @@ import { supabase } from '@/lib/supabase'
 import { useCollectionOwner } from '@/lib/collection'
 import { getDiscogsMarketStats, getDiscogsReleaseId, marketPriceColumns, pickMarketPrice, getDiscogsTokenProblem, migrateLegacyDiscogsToken, saveDiscogsToken, searchDiscogsReleases, syncRecordsToDiscogs, type DiscogsSyncResult } from '@/lib/discogs'
 import { translations, type Language } from '@/lib/i18n'
-import { isOnFacebookMarketplace, normalizeMatchText, storeExclusion, type VinylRecord } from '@/lib/record'
+import { isAutoMatched, isOnFacebookMarketplace, normalizeMatchText, storeExclusion, type VinylRecord } from '@/lib/record'
 import { AdminDashboard } from '@/components/AdminDashboard'
 import { CollectionGaps } from '@/components/CollectionGaps'
 import { detectSetupIssue, showSetupIssue } from '@/lib/setupIssues'
@@ -288,7 +288,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
         for (;;) {
           const { data: records, error } = await supabase
             .from('vinyl_records')
-            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_group, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, discogs_market_price, discogs_market_currency, discogs_market_condition, discogs_num_for_sale, price_on_discogs, sale_price_cad:record_sale_price_cad, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, spotify_album_id, spotify_matched_at, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
+            .select('id, collection_owner, artist, title, year_pressed, catalog_number, genre, sub_genre, record_label, record_group, record_type, record_size, country_pressed, media_condition, sleeve_condition, is_original, is_special_edition, special_edition_reason, sell_possibility, sold, discogs_lowest_price, discogs_market_price, discogs_market_currency, discogs_market_condition, discogs_num_for_sale, price_on_discogs, sale_price_cad:record_sale_price_cad, discogs_synced_at, marketplace_price, marketplace_currency, notes, discogs_link, discogs_auto_match, discogs_auto_cover, spotify_album_id, spotify_matched_at, image_url, original_image_url, source_url, created_at, is_hero, hero_tagline')
             .eq('collection_owner', owner)
             .order('created_at', { ascending: false })
             .order('id', { ascending: true })
@@ -369,6 +369,9 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
   }
 
   async function updateDiscogsPrice(record: VinylRecord): Promise<'updated' | 'no-release' | 'no-price'> {
+    // An automatic match may be another pressing: the price waits until the admin confirms it.
+    if (isAutoMatched(record)) return 'no-release'
+
     let releaseId = getDiscogsReleaseId(record.discogs_link)
       ?? getDiscogsReleaseId(record.image_url)
 
@@ -740,9 +743,9 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
 
     const selectedRecords = explicitRecords ?? data.filter((record) => selectedSyncIds.has(record.id))
     const syncableRecords = selectedRecords
-      .map((record) => ({ record, releaseId: getDiscogsReleaseId(record.discogs_link) }))
+      .map((record) => ({ record, releaseId: isAutoMatched(record) ? null : getDiscogsReleaseId(record.discogs_link) }))
       .filter((entry): entry is { record: VinylRecord; releaseId: number } => entry.releaseId !== null)
-    const skippedRecords = selectedRecords.filter((record) => getDiscogsReleaseId(record.discogs_link) === null)
+    const skippedRecords = selectedRecords.filter((record) => isAutoMatched(record) || getDiscogsReleaseId(record.discogs_link) === null)
 
     if (syncableRecords.length === 0) {
       setSyncSummary(syncUiText.noReleaseForSync)
@@ -1035,12 +1038,20 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
         return url ? (
           <button
             type="button"
-            className="block rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="relative block rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={`${t.viewCover}: ${row.original.artist ?? ''} - ${row.original.title ?? ''}`}
             title={t.viewCover}
             onClick={() => setPreviewingRecord(row.original)}
           >
             <img src={url} alt={t.cover} className="h-12 w-12 rounded-sm object-cover shadow-sm" loading="lazy" decoding="async" />
+            {(row.original.discogs_auto_match === 'provisional' || row.original.discogs_auto_cover) && (
+              <span
+                className="absolute inset-x-0 bottom-0 rounded-b-sm bg-amber-500 text-center text-[8px] font-medium leading-3 text-black"
+                title={row.original.discogs_auto_match === 'provisional' ? t.provisionalLink : t.provisionalCover}
+              >
+                {t.provisionalBadge}
+              </span>
+            )}
           </button>
         ) : (
           <div className="flex h-12 w-12 items-center justify-center rounded-sm bg-muted text-center text-[10px] leading-tight text-muted-foreground">{t.noImage}</div>
@@ -1241,7 +1252,7 @@ export function DataTable({ language, recordsVersion, view }: { language: Langua
       cell: ({ row }) => {
         const record = row.original
         const isSynced = Boolean(record.discogs_synced_at)
-        const hasLink = getDiscogsReleaseId(record.discogs_link) !== null
+        const hasLink = getDiscogsReleaseId(record.discogs_link) !== null && !isAutoMatched(record)
         const isSelected = selectedSyncIds.has(record.id)
         const releaseUrl = record.discogs_link?.trim() || null
 

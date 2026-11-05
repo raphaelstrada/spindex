@@ -36,6 +36,12 @@ export type VinylRecord = {
   marketplace_currency?: string | null
   notes?: string | null
   discogs_link?: string | null
+  /** Automatic match by artist + album. Null = not processed, or confirmed by the admin. */
+  discogs_auto_match?: 'provisional' | 'ambiguous' | 'no_match' | null
+  discogs_auto_match_score?: number | null
+  discogs_auto_matched_at?: string | null
+  /** The cover came from the first Discogs search result, not from a matched release. */
+  discogs_auto_cover?: boolean | null
   spotify_album_id?: string | null
   spotify_matched_at?: string | null
   created_at?: string | null
@@ -52,6 +58,18 @@ export function storeExclusion(record: VinylRecord): 'sold' | 'notForSale' | 'no
 /** A record counts as on Facebook Marketplace once it has a listing URL or a Marketplace price. */
 export function isOnFacebookMarketplace(record: VinylRecord) {
   return Boolean(record.source_url?.includes('facebook.com')) || record.marketplace_price != null
+}
+
+/** The Discogs link and cover are a guess until the admin picks a release: no prices, syncs or checks from them. */
+export function isAutoMatched(record: Pick<VinylRecord, 'discogs_auto_match' | 'discogs_auto_cover'> | null | undefined) {
+  return Boolean(record?.discogs_auto_match || record?.discogs_auto_cover)
+}
+
+export const NO_AUTO_MATCH = {
+  discogs_auto_match: null,
+  discogs_auto_match_score: null,
+  discogs_auto_matched_at: null,
+  discogs_auto_cover: false,
 }
 
 /** Loose text for matching names across Discogs/Spotify: no accents, case, punctuation or "and". */

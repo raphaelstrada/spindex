@@ -9,6 +9,7 @@ const corsHeaders = {
 type DiscogsResult = {
   id: number
   title: string
+  master_id?: number
   year?: number | string
   country?: string
   format?: string[]
@@ -165,6 +166,7 @@ function toRelease(release: DiscogsResult, fallbackArtist: string) {
 
   return {
     id: release.id,
+    masterId: release.master_id ?? null,
     title: release.title,
     artist: releaseArtist,
     releaseTitle,
@@ -324,6 +326,8 @@ Deno.serve(async (request) => {
     const artist = typeof body.artist === 'string' ? body.artist.trim() : ''
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     const releaseUrl = typeof body.releaseUrl === 'string' ? body.releaseUrl.trim() : ''
+    const freeText = typeof body.freeText === 'string' ? body.freeText.trim() : ''
+    const firstPageOnly = body.firstPageOnly === true
     const priceReleaseId = typeof body.priceReleaseId === 'number' ? body.priceReleaseId : null
     const gapsReleaseId = typeof body.artistGapsReleaseId === 'number' ? body.artistGapsReleaseId : null
     const country = typeof body.country === 'string' ? body.country.trim() : ''
@@ -347,7 +351,7 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: 'Invalid release id.' }, 400)
     }
 
-    if ((priceReleaseId === null && gapsReleaseId === null && !artist && !title && !releaseUrl && !barcode && !catno) || (priceReleaseId !== null && (!Number.isSafeInteger(priceReleaseId) || priceReleaseId <= 0)) || artist.length > 200 || title.length > 200 || releaseUrl.length > 500 || country.length > 100 || (year && !/^\d{4}$/.test(year))) {
+    if ((priceReleaseId === null && gapsReleaseId === null && !artist && !title && !releaseUrl && !barcode && !catno && !freeText) || freeText.length > 400 || (priceReleaseId !== null && (!Number.isSafeInteger(priceReleaseId) || priceReleaseId <= 0)) || artist.length > 200 || title.length > 200 || releaseUrl.length > 500 || country.length > 100 || (year && !/^\d{4}$/.test(year))) {
       return jsonResponse({ error: 'Provide an artist, an album title, or both.' }, 400)
     }
 
@@ -523,6 +527,7 @@ Deno.serve(async (request) => {
     searchUrl.searchParams.set('type', 'release')
     if (artist) searchUrl.searchParams.set('artist', artist)
     if (title) searchUrl.searchParams.set('release_title', title)
+    if (freeText) searchUrl.searchParams.set('q', freeText)
     if (country) searchUrl.searchParams.set('country', country)
     if (year) searchUrl.searchParams.set('year', year)
     if (barcode) searchUrl.searchParams.set('barcode', barcode)
@@ -549,7 +554,7 @@ Deno.serve(async (request) => {
 
     // Collect every remaining page. If a later page fails (e.g. Discogs rate limit), return what we
     // already have instead of failing the whole search.
-    for (let page = 2; page <= Math.min(totalPages, MAX_SEARCH_PAGES); page++) {
+    for (let page = 2; page <= Math.min(totalPages, firstPageOnly ? 1 : MAX_SEARCH_PAGES); page++) {
       const pageResponse = await fetchSearchPage(page)
       if (!pageResponse.ok) {
         console.warn(`Discogs search page ${page} failed with HTTP ${pageResponse.status}; returning partial results.`)

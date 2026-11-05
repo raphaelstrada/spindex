@@ -7,6 +7,7 @@ import { BarcodeRecordImport } from '@/components/BarcodeRecordImport'
 import { CatalogNumberRecordImport } from '@/components/CatalogNumberRecordImport'
 import { DataTable, type AdminView } from '@/components/DataTable'
 import { DiscogsVerification } from '@/components/DiscogsVerification'
+import { DiscogsAutoMatch } from '@/components/DiscogsAutoMatch'
 import { OrdersDialog } from '@/components/OrdersDialog'
 import { ShippingSettingsDialog } from '@/components/ShippingSettingsDialog'
 import { Button } from '@/components/ui/button'
@@ -149,6 +150,7 @@ export default function AdminPage() {
           )}
           {/* Visible in both views so the background verification keeps running when the view changes. */}
           <DiscogsVerification language={language} onRecordsChanged={() => setRecordsVersion((version) => version + 1)} />
+          <DiscogsAutoMatch language={language} onRecordsChanged={() => setRecordsVersion((version) => version + 1)} />
           {view === 'inventory' && (
           <Dialog open={isOpen} onOpenChange={(open) => {
             setIsOpen(open)

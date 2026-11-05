@@ -4,6 +4,8 @@ import { reportSetupIssue, showSetupIssue } from '@/lib/setupIssues'
 
 export type DiscogsRelease = {
   id: number
+  /** Search results only: the album this pressing belongs to. 0 = none on Discogs. */
+  masterId?: number | null
   title: string
   artist: string
   releaseTitle: string
@@ -157,6 +159,17 @@ export async function searchDiscogsReleases(
 }
 
 /** Keeps only digits (removes spaces, dashes, etc.). */
+/** One page of results in Discogs order, for callers that run in bulk under the rate limit. */
+export async function searchDiscogsFirstPage(query: { artist: string; title: string } | { freeText: string }) {
+  const { data, error } = await supabase.functions.invoke<{ results: DiscogsRelease[] }>(
+    'discogs-search',
+    { body: { ...query, firstPageOnly: true } },
+  )
+
+  if (error) throw await discogsSearchError(error)
+  return data?.results ?? []
+}
+
 export function normalizeBarcode(raw: string): string {
   return raw.replace(/\D/g, '')
 }

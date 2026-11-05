@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCollectionOwner } from '@/lib/collection'
+import { isAutoMatchRunning } from '@/lib/discogsAutoMatch'
 import {
   VERIFICATION_COLUMNS,
   diffRecord,
@@ -51,6 +52,10 @@ export function DiscogsVerification({ language, onRecordsChanged }: { language: 
   const [reviewing, setReviewing] = useState<DiscogsConflict | null>(null)
 
   async function start() {
+    if (isAutoMatchRunning(owner)) {
+      alert(t.busy)
+      return
+    }
     setIsStarting(true)
     try {
       await verification.start()

@@ -24,7 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { friendlyErrorMessage } from '@/lib/setupIssues'
 import { translations, type Language } from '@/lib/i18n'
-import type { VinylRecord } from '@/lib/record'
+import { isAutoMatched, NO_AUTO_MATCH, type VinylRecord } from '@/lib/record'
 import { ensureSpotifyReady, parseSpotifyAlbumId, searchSpotifyAlbums, spotifyAlbumUrl, syncRecordAlbum, type SpotifyAlbumCandidate } from '@/lib/spotify'
 import { detectSetupIssue, showSetupIssue } from '@/lib/setupIssues'
 import { SpotifyAlbumPicker } from '@/components/SpotifyAlbumPicker'
@@ -243,7 +243,13 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
     let discogsMarketPrice = values.discogs_market_price
     // Market details saved next to the price (currency, condition, copies for sale, check date).
     let marketDetails: Partial<Omit<ReturnType<typeof marketPriceColumns>, 'discogs_market_price'>> = {}
-    const associatedReleaseId = selectedDiscogsRelease?.id ?? getDiscogsReleaseId(values.discogs_link)
+    const savedReleaseId = getDiscogsReleaseId(values.discogs_link)
+    // Picking a release, even the same one, or changing the link replaces the automatic Discogs match.
+    const confirmsAutoMatch = savedReleaseId !== getDiscogsReleaseId(record?.discogs_link)
+      || (savedReleaseId !== null && selectedDiscogsRelease?.id === savedReleaseId)
+    const keepsAutoMatch = isAutoMatched(record) && !confirmsAutoMatch
+    // An unconfirmed link may be another pressing: its market price says nothing about this record.
+    const associatedReleaseId = selectedDiscogsRelease?.id ?? (keepsAutoMatch ? null : savedReleaseId)
     if (associatedReleaseId) {
       try {
         const market = pickMarketPrice(await getDiscogsMarketStats(associatedReleaseId), values.media_condition)
@@ -276,6 +282,10 @@ export function RecordForm({ language, record, initialValues, showTopSaveButton 
       discogs_market_price: discogsMarketPrice,
       spotify_album_id: parseSpotifyAlbumId(values.spotify_album_id) ?? undefined,
       ...(originalImageUrl ? { original_image_url: originalImageUrl } : {}),
+      ...(isAutoMatched(record) && confirmsAutoMatch ? NO_AUTO_MATCH : {}),
+      ...(keepsAutoMatch && record?.discogs_auto_cover && (values.image_url ?? '') !== (record.image_url ?? '')
+        ? { discogs_auto_cover: false }
+        : {}),
     }
     const releaseChanged = Boolean(record?.discogs_synced_at)
       && getDiscogsReleaseId(record?.discogs_link) !== getDiscogsReleaseId(valuesToSave.discogs_link)
